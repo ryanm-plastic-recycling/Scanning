@@ -11,11 +11,11 @@
 
 const express = require('express');
 const axios = require('axios');
-const ExcelJS = require('exceljs');
 const https = require('https');
 const http = require('http');
-const path = require("path");
-const ExcelJS = require("exceljs");
+const path = require('path');
+const fs = require('fs');
+const ExcelJS = require('exceljs');
 
 // Create an HTTPS Agent that ignores self-signed certs (for testing only)
 const httpsAgent = new https.Agent({
@@ -47,6 +47,9 @@ const AUTH_URL = "/cloud/localRestLogin";
 const START_URL = "/cloud/start";
 const STOP_URL = "/cloud/stop";
 
+// Local Excel source for preview (override with env var LOCAL_DB_XLSX)
+const LOCAL_DB_XLSX = process.env.LOCAL_DB_XLSX || path.resolve(__dirname, "data", "Inventory.xlsx");
+
 // In-memory store of unique tags (keyed by TID if available, else EPC)
 let tagStore = {};
 
@@ -58,6 +61,7 @@ let scanStartTime = null;
 let isFindBoxScanning = false;
 
 const app = express();
+
 app.post('/fxr90', (req, res, next) => {
   console.log("HEADERS:", req.headers);
   next(); // proceed to json parser
@@ -260,13 +264,20 @@ app.get('/api/export', async (req, res) => {
   }
 });
 
+/******************************************************
+ * DB PREVIEW ENDPOINT (Node on 3000)
+ * Reads a LOCAL Excel file and returns { columns, rows }
+ ******************************************************/
 app.get("/api/db/preview", async (req, res) => {
   try {
-    // change this to your actual local file path or load from config.json
-    const filePath = path.resolve(__dirname, "data", "Inventory.xlsx");
+    if (!fs.existsSync(LOCAL_DB_XLSX)) {
+      return res.status(500).json({
+        error: `Local Excel file not found: ${LOCAL_DB_XLSX}. Set env var LOCAL_DB_XLSX to override.`
+      });
+    }
 
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
+    await workbook.xlsx.readFile(LOCAL_DB_XLSX);
 
     const ws = workbook.worksheets[0];
     if (!ws) return res.status(500).json({ error: "No worksheet found in file." });
@@ -283,7 +294,7 @@ app.get("/api/db/preview", async (req, res) => {
       rows.push(row);
     }
 
-    res.json({ columns, rows });
+    res.json({ columns, rows, file: LOCAL_DB_XLSX });
   } catch (e) {
     res.status(500).json({ error: String(e?.message || e) });
   }
@@ -422,5 +433,5 @@ app.use((err, req, res, next) => {
 server.listen(APP_PORT, () => {
   console.log(`Server listening on port ${APP_PORT}`);
   console.log(`Point your browser to http://localhost:${APP_PORT}/`);
+  console.log(`DB Preview reads: ${LOCAL_DB_XLSX} (override with LOCAL_DB_XLSX env var)`);
 });
-
