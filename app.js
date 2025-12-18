@@ -14,6 +14,8 @@ const axios = require('axios');
 const ExcelJS = require('exceljs');
 const https = require('https');
 const http = require('http');
+const path = require("path");
+const ExcelJS = require("exceljs");
 
 // Create an HTTPS Agent that ignores self-signed certs (for testing only)
 const httpsAgent = new https.Agent({
@@ -258,6 +260,35 @@ app.get('/api/export', async (req, res) => {
   }
 });
 
+app.get("/api/db/preview", async (req, res) => {
+  try {
+    // change this to your actual local file path or load from config.json
+    const filePath = path.resolve(__dirname, "data", "Inventory.xlsx");
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+
+    const ws = workbook.worksheets[0];
+    if (!ws) return res.status(500).json({ error: "No worksheet found in file." });
+
+    const headerRow = ws.getRow(1);
+    const columns = headerRow.values.slice(1).map(v => String(v ?? "").trim());
+
+    const rows = [];
+    const maxRows = 200;
+
+    for (let r = 2; r <= ws.rowCount && rows.length < maxRows; r++) {
+      const row = ws.getRow(r).values.slice(1);
+      if (row.every(v => v === null || v === undefined || String(v).trim() === "")) continue;
+      rows.push(row);
+    }
+
+    res.json({ columns, rows });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
 /******************************************************
  * HELPER FUNCTIONS
  ******************************************************/
@@ -392,3 +423,4 @@ server.listen(APP_PORT, () => {
   console.log(`Server listening on port ${APP_PORT}`);
   console.log(`Point your browser to http://localhost:${APP_PORT}/`);
 });
+
