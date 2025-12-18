@@ -36,6 +36,9 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       <TargetPath>$(AssemblyName).dll.config</TargetPath>
     </None>
+    <None Update="DB.xlsx">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
