@@ -1,0 +1,394 @@
+/****************************************************** 
+ * app.js
+ * 
+ * Node.js server that:
+ * 1) Hosts a push endpoint for FXR90 readers (/fxr90).
+ * 2) Hosts a GUI at http://yourIP:3000/ (serves /public/index.html).
+ * 3) Provides Start/Stop/Pause/Clear endpoints for the front-end.
+ * 4) Merges and stores tag data in memory (unique tags only).
+ * 5) Exports data to XLSX on demand.
+ ******************************************************/
+
+const express = require('express');
+const axios = require('axios');
+const ExcelJS = require('exceljs');
+const https = require('https');
+const http = require('http');
+
+// Create an HTTPS Agent that ignores self-signed certs (for testing only)
+const httpsAgent = new https.Agent({
+  rejectUnauthorized: false
+});
+
+// === CONFIGURE YOUR READERS HERE === //
+const READERS = [
+  {
+    name: "Reader8Port",
+    ip: "192.168.48.251",   //WIRED
+    //ip: "192.168.49.24",   //WIFI
+    user: "admin",
+    pass: "PRIscan123!",
+    token: null // Token for this reader will be stored here
+  },
+  {
+    name: "Reader4Port",
+    ip: "192.168.50.250",   //WIRED
+    //ip: "192.168.50.117",   //WIFI
+    user: "admin",
+    pass: "PRIscan123!",
+    token: null
+  }
+];
+
+const APP_PORT = 3000;          // Node server port
+const AUTH_URL = "/cloud/localRestLogin";
+const START_URL = "/cloud/start";
+const STOP_URL = "/cloud/stop";
+
+// In-memory store of unique tags (keyed by TID if available, else EPC)
+let tagStore = {};
+
+// Track scanning state & timer for normal scanning
+let isScanning = false;
+let scanStartTime = null;
+
+// NEW: Flag for Find a Box scanning
+let isFindBoxScanning = false;
+
+const app = express();
+app.post('/fxr90', (req, res, next) => {
+  console.log("HEADERS:", req.headers);
+  next(); // proceed to json parser
+});
+
+app.use('/fxr90', express.json({
+  limit: '10mb',
+  verify: (req, res, buf, encoding) => {
+    if (!req.headers['content-type']?.includes('application/json')) {
+      throw new Error('Invalid content-type');
+    }
+  }
+}));
+
+app.use(express.static('public')); // Serve static files from /public
+
+// Create HTTP server and integrate Socket.IO for real-time updates
+const server = http.createServer(app);
+const { Server } = require('socket.io');
+const io = new Server(server);
+
+// Socket.IO connection handler
+io.on('connection', (socket) => {
+  console.log('A client connected. Socket ID:', socket.id);
+  // Optionally, send the initial tag data:
+  socket.emit('initialTags', Object.values(tagStore));
+
+  // Listen for Find a Box scanning events from clients
+  socket.on('startFindBoxScan', (data) => {
+    const filter = data.filter || "";
+    console.log("Received 'startFindBoxScan' event with filter:", filter);
+    isFindBoxScanning = true;
+    // For Find a Box scanning, force-start a new scanning session on readers
+    Promise.all(READERS.map(r => loginAndStart(r)))
+      .then(() => {
+        // We do not set isScanning here since this is a dedicated find box session.
+        scanStartTime = new Date();
+        console.log("Find a Box scanning started successfully on all readers.");
+        socket.emit('findBoxScanStatus', { success: true, message: "Find a Box scanning started" });
+      })
+      .catch(err => {
+        console.error("Error starting Find a Box scanning:", err);
+        socket.emit('findBoxScanStatus', { success: false, message: err.toString() });
+      });
+  });
+
+  socket.on('stopFindBoxScan', () => {
+    console.log("Received 'stopFindBoxScan' event.");
+    Promise.all(READERS.map(r => stopReader(r)))
+      .then(() => {
+        isFindBoxScanning = false;
+        console.log("Find a Box scanning stopped successfully on all readers.");
+        socket.emit('findBoxScanStatus', { success: true, message: "Find a Box scanning stopped" });
+      })
+      .catch(err => {
+        console.error("Error stopping Find a Box scanning:", err);
+        socket.emit('findBoxScanStatus', { success: false, message: err.toString() });
+      });
+  });
+});
+
+/******************************************************
+ * 1) PUSH ENDPOINT for Readers to POST Tag Data
+ ******************************************************/
+app.post('/fxr90', (req, res) => {
+  console.log("FXR90 data inbound:", JSON.stringify(req.body));
+
+  // Process tag data if either normal scanning or find box scanning is active.
+  if (!isScanning && !isFindBoxScanning) {
+    console.log("Received tag data but neither normal scanning nor find box scanning is active. Ignoring.");
+    return res.sendStatus(200);
+  }
+
+  // Expect the incoming payload to be an array of events
+  const events = req.body;
+  if (!Array.isArray(events)) {
+    return res.sendStatus(400);
+  }
+
+  events.forEach(event => {
+    // Get the EPC hex from event.data.idHex
+    const epcHex = (event?.data?.idHex || "").toUpperCase().trim();
+    // If a separate TID exists, assign it; otherwise, leave it empty.
+    const tidHex = "";
+    const epcAscii = hexToAscii(epcHex);
+    console.log(`Converted ${epcHex} to ASCII: ${epcAscii}`);
+
+    // Optionally filter out tags that don't meet your criteria:
+    if (!isValidAsciiTag(epcAscii)) return;
+
+    // Use TID if available; otherwise, EPC as key
+    const key = tidHex ? tidHex : epcHex;
+
+    if (!tagStore[key]) {
+      const newTag = {
+        firstSeen: new Date().toISOString(),
+        tidHex: tidHex,
+        epcHex: epcHex,
+        epcAscii: epcAscii,
+        antenna: event.data.antenna,
+        rssi: event.data.peakRssi,
+        seenCount: 1
+      };
+      tagStore[key] = newTag;
+      // Emit events to connected clients via Socket.IO
+      io.emit('newTag', newTag);
+      io.emit('findBoxTag', newTag);
+    } else {
+      // Update the tag data and emit update for findBoxTag
+      tagStore[key].seenCount = event.data.seenCount || (tagStore[key].seenCount + 1);
+      tagStore[key].rssi = event.data.peakRssi;
+      io.emit('findBoxTag', tagStore[key]);
+    }
+  });
+  res.sendStatus(200);
+});
+
+/******************************************************
+ * 2) GUI CONTROL ENDPOINTS
+ ******************************************************/
+
+// Start scanning (normal scanning)
+app.get('/api/start', async (req, res) => {
+  console.log("Received /api/start request");
+  try {
+    await Promise.all(READERS.map(r => loginAndStart(r)));
+    isScanning = true;
+    scanStartTime = new Date();
+    console.log("Scanning started successfully on all readers.");
+    res.json({ success: true, message: "Scanning started" });
+  } catch (err) {
+    console.error("Error in /api/start:", err);
+    res.json({ success: false, message: err.toString() });
+  }
+});
+
+// Stop scanning (normal scanning)
+app.get('/api/stop', async (req, res) => {
+  console.log("Received /api/stop request");
+  try {
+    await Promise.all(READERS.map(r => stopReader(r)));
+    isScanning = false;
+    console.log("Scanning stopped successfully on all readers.");
+    res.json({ success: true, message: "Scanning stopped" });
+  } catch (err) {
+    console.error("Error in /api/stop:", err);
+    res.json({ success: false, message: err.toString() });
+  }
+});
+
+// Pause scanning (data is retained)
+app.get('/api/pause', async (req, res) => {
+  console.log("Received /api/pause request");
+  try {
+    await Promise.all(READERS.map(r => stopReader(r)));
+    isScanning = false;
+    res.json({ success: true, message: "Scanning paused (data retained)" });
+  } catch (err) {
+    console.error("Error in /api/pause:", err);
+    res.json({ success: false, message: err.toString() });
+  }
+});
+
+// Clear tag data
+app.get('/api/clear', (req, res) => {
+  tagStore = {};
+  scanStartTime = isScanning || isFindBoxScanning ? new Date() : null;
+  res.json({ success: true, message: "Data cleared" });
+});
+
+// Get all current tag data with caching disabled
+app.get('/api/tags', (req, res) => {
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json(Object.values(tagStore));
+});
+
+// Export to XLSX
+app.get('/api/export', async (req, res) => {
+  try {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('FXR90 Tags');
+    sheet.columns = [
+      { header: 'First Seen', key: 'firstSeen', width: 20 },
+      { header: 'TID (Hex)', key: 'tidHex', width: 35 },
+      { header: 'EPC (Hex)', key: 'epcHex', width: 35 },
+      { header: 'EPC (ASCII)', key: 'epcAscii', width: 35 },
+      { header: 'RSSI', key: 'rssi', width: 10 },
+      { header: 'Seen Count', key: 'seenCount', width: 10 }
+    ];
+    Object.values(tagStore).forEach(t => {
+      sheet.addRow(t);
+    });
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.setHeader('Content-Disposition', 'attachment; filename="fxr90-tags.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+  } catch (err) {
+    console.error("Error exporting XLSX:", err);
+    res.status(500).send(err.toString());
+  }
+});
+
+/******************************************************
+ * HELPER FUNCTIONS
+ ******************************************************/
+
+// Log in to the reader, then force-stop any active scan before starting a new scan
+async function loginAndStart(reader) {
+  const loginUrl = `https://${reader.ip}${AUTH_URL}`;
+  const authString = Buffer.from(`${reader.user}:${reader.pass}`).toString('base64');
+  const resp = await axios.get(loginUrl, {
+    headers: { 'Authorization': `Basic ${authString}` },
+    httpsAgent
+  });
+  if (resp.data && resp.data.message) {
+    reader.token = resp.data.message;
+  } else {
+    throw new Error(`No token in login response from ${reader.ip}`);
+  }
+  // Force-stop any active scan before starting
+  try {
+    await stopReader(reader);
+  } catch (err) {
+    console.log(`Stop command not successful (possibly no active scan) for ${reader.ip}: ${err}`);
+  }
+  // Wait a few seconds to let the reader settle
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  await startReader(reader);
+}
+
+// Helper for re-login without starting scanning (used if token is rejected during stop)
+async function loginToReader(reader) {
+  const loginUrl = `https://${reader.ip}${AUTH_URL}`;
+  const authString = Buffer.from(`${reader.user}:${reader.pass}`).toString('base64');
+  const resp = await axios.get(loginUrl, {
+    headers: { 'Authorization': `Basic ${authString}` },
+    httpsAgent
+  });
+  if (resp.data && resp.data.message) {
+    reader.token = resp.data.message;
+  } else {
+    throw new Error(`No token in login response from ${reader.ip}`);
+  }
+}
+
+// Call /cloud/start; if a 422 error occurs (indicating scan already running), stop then retry
+async function startReader(reader) {
+  const url = `https://${reader.ip}${START_URL}`;
+  try {
+    await axios.put(url, {}, {
+      headers: { 'Authorization': `Bearer ${reader.token}` },
+      httpsAgent
+    });
+  } catch (err) {
+    if (err.response && err.response.status === 422) {
+      console.log(`Reader ${reader.ip} already scanning. Issuing STOP then retrying START...`);
+      await stopReader(reader);
+      await new Promise(resolve => setTimeout(resolve, 3000)); // extra delay
+      await axios.put(url, {}, {
+        headers: { 'Authorization': `Bearer ${reader.token}` },
+        httpsAgent
+      });
+    } else {
+      throw err;
+    }
+  }
+}
+
+// Call /cloud/stop; if a 401 occurs, re-login and retry
+async function stopReader(reader) {
+  const url = `https://${reader.ip}${STOP_URL}`;
+  try {
+    return await axios.put(url, {}, {
+      headers: { 'Authorization': `Bearer ${reader.token}` },
+      httpsAgent
+    });
+  } catch (err) {
+    if (err.response && err.response.status === 401) {
+      console.log(`Received 401 on stop for ${reader.ip}, re-logging in...`);
+      await loginToReader(reader);
+      return axios.put(url, {}, {
+        headers: { 'Authorization': `Bearer ${reader.token}` },
+        httpsAgent
+      });
+    }
+    throw err;
+  }
+}
+
+// Convert EPC from hex to ASCII
+function hexToAscii(hexString) {
+  hexString = hexString.replace(/\s+/g, '');
+  if (hexString.length % 2 !== 0) return "";
+  let ascii = "";
+  for (let i = 0; i < hexString.length; i += 2) {
+    const part = hexString.substr(i, 2);
+    const code = parseInt(part, 16);
+    ascii += (code >= 32 && code <= 126) ? String.fromCharCode(code) : ".";
+  }
+  return ascii;
+}
+
+// Check if ASCII starts with "FF", "PL", "BL", "GL", or "PRI-"
+function isValidAsciiTag(asciiTag) {
+  if (!asciiTag) return false;
+  const upper = asciiTag.toUpperCase();
+  return (
+    upper.startsWith("FF") ||
+    upper.startsWith("PL") ||
+    upper.startsWith("BL") ||
+    upper.startsWith("GL") ||
+    upper.startsWith("PRI-")
+  );
+}
+
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.parse.failed') {
+    console.error('Invalid JSON payload received.');
+    return res.status(400).send('Invalid JSON');
+  }
+
+  if (err.type === 'request.aborted') {
+    console.error('Request was aborted by the client.');
+    return res.status(400).send('Request aborted');
+  }
+
+  next(err); // pass other errors along
+});
+
+/******************************************************
+ * 3) START the EXPRESS SERVER
+ ******************************************************/
+server.listen(APP_PORT, () => {
+  console.log(`Server listening on port ${APP_PORT}`);
+  console.log(`Point your browser to http://localhost:${APP_PORT}/`);
+});

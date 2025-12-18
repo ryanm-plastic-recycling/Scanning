@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- Reference only Symbol.RFID3.Host (the .NET wrapper) -->
+  <ItemGroup>
+    <Reference Include="Symbol.RFID3.Host">
+      <HintPath>libs\Symbol.RFID3.Host.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Copy the native RFIDAPI32PC.dll so the .NET wrapper can find it -->
+  <ItemGroup>
+    <None Update="libs\RFIDAPI32PC.dll">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Your other NuGet packages -->
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.0" />
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.68.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="System.Configuration.ConfigurationManager" Version="7.0.0" />
+  </ItemGroup>
+
+  <!-- (Optional) If you ever add an App.config, copy it to [AssemblyName].dll.config -->
+  <ItemGroup>
+    <None Update="App.config">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <TargetPath>$(AssemblyName).dll.config</TargetPath>
+    </None>
+  </ItemGroup>
+
+</Project>
