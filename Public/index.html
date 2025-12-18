@@ -3,8 +3,10 @@
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" charset="utf-8">
   <title>Inventory Scanning</title>
-  <!-- Load Chart.js from CDN for the pie chart -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Chart.js (LOCAL) -->
+  <script src="js/chart.umd.min.js"></script>
+
   <style>
     /* Base and Background */
     body {
@@ -184,12 +186,18 @@
       padding: 12px 15px;
       font-size: 18px;
       text-align: left;
+      border-bottom: 1px solid #ddd;
+      vertical-align: top;
+      white-space: nowrap;
     }
     table th {
       background-color: #f2f2f2;
       border-bottom: 2px solid #ddd;
       cursor: pointer;
       user-select: none;
+      position: sticky;
+      top: 110px; /* below top bar */
+      z-index: 2;
     }
     table tr:nth-child(even) {
       background-color: #f9f9f9;
@@ -243,6 +251,7 @@
     }
     .statsBox table td {
       padding: 5px 10px;
+      border-bottom: none;
     }
     /* Right Stats: For the Pie Chart */
     #chartContainer {
@@ -276,7 +285,7 @@
       box-shadow: 0 4px 12px rgba(0,0,0,0.2);
       z-index: 2000;
       display: none;
-      width: 300px;
+      width: 360px;
       text-align: center;
     }
     #recordOptionsPopup button {
@@ -340,6 +349,14 @@
     }
     /* Tiny CSS win: clickable rows */
     #tagsTable tbody tr { cursor: pointer; }
+    /* Allow horizontal scroll if you add a lot of columns */
+    .tableWrap { overflow-x: auto; }
+    /* Prevent long values from bulldozing the table */
+    .truncate {
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
   </style>
 </head>
 <body>
@@ -387,7 +404,7 @@
         <button id="exportFilteredBtn">Export Filtered</button>
       </div>
     </div>
-	  
+
     <!-- Temporary status messages -->
     <div class="status-bar" id="statusMessage"></div>
 
@@ -417,8 +434,8 @@
             <tr class="total-row"><td>Total:</td><td id="lenTotal">0</td></tr>
           </table>
         </div>
-
       </div>
+
       <!-- Right Stats: Lot Type Pie Chart -->
       <div class="statsBox" id="chartContainer">
         <h3>Lot Type Pie Chart</h3>
@@ -433,23 +450,43 @@
       <button id="searchBtn">Search</button>
       <button id="clearSearchBtn">Clear Search</button>
     </div>
+
     <!-- Tag List Table -->
     <h2>Tag List (Filtered): <span id="count">0</span></h2>
-    <table id="tagsTable">
-      <thead>
-        <tr>
-          <th onclick="sortTags('firstSeen')">First Seen</th>
-          <th>TID (Hex)</th>
-          <th>EPC (Hex)</th>
-          <th onclick="sortTags('epcAscii')">ASCII</th>
-          <th>RSSI</th>
-          <th>SeenCount</th>
-        </tr>
-      </thead>
-      <tbody id="tagsBody">
-        <!-- Populated by JavaScript -->
-      </tbody>
-    </table>
+
+    <div class="tableWrap">
+      <table id="tagsTable">
+        <thead>
+          <tr>
+            <th onclick="sortTags('firstSeen')">First Seen</th>
+            <th>TID (Hex)</th>
+            <th>EPC (Hex)</th>
+            <th onclick="sortTags('epcAscii')">ASCII</th>
+            <th>RSSI</th>
+            <th>SeenCount</th>
+
+            <!-- Joined from DB (key = RFIDBOX == ASCII) -->
+            <th>LOT</th>
+            <th>DEPT</th>
+            <th>ROW</th>
+            <th>DEPT LOT</th>
+            <th>SUPPLIER</th>
+            <th>TYPE</th>
+            <th>COLOR</th>
+            <th>FORMAT</th>
+            <th>POUNDS</th>
+            <th>PRICE</th>
+            <th>FREIGHT</th>
+            <th>TOLL</th>
+            <th>DATE</th>
+          </tr>
+        </thead>
+        <tbody id="tagsBody">
+          <!-- Populated by JavaScript -->
+        </tbody>
+      </table>
+    </div>
+
     <!-- Pagination Controls (dynamically rendered) -->
     <div id="paginationControls"></div>
   </div>
@@ -459,8 +496,7 @@
     <span class="closePopup" id="closePopup">&times;</span>
     <p id="popupMessage">Options for record: <span id="popupRecord"></span></p>
     <button id="popupFindBoxBtn">Find Box</button>
-    <button id="popupPullSPBtn">Pull SharePoint Data</button>
-    <!-- NEW: Copy ASCII quick hitter -->
+    <button id="popupPullSPBtn">Pull DB Data</button>
     <button id="popupCopyAsciiBtn">Copy ASCII</button>
     <div id="sharepointData" style="margin-top:10px; display:none;"></div>
   </div>
@@ -473,7 +509,6 @@
       <input type="text" id="findBoxInput" placeholder="Enter ASCII text" />
       <br>
       <button id="searchBoxBtn">Search Box</button>
-      <!-- Additional button to query SharePoint for this item -->
       <button id="querySharepointBtn">Query Sharepoint</button>
       <div id="signalIndicator"></div>
     </div>
@@ -481,6 +516,7 @@
 
   <!-- Include Socket.IO client library -->
   <script src="/socket.io/socket.io.js"></script>
+
   <script>
     let allTags = []; // master list
     let timerInterval = null;
@@ -490,7 +526,10 @@
     let currentSort = 'firstSeen'; // default sort
     let lotChart = null;
     let currentPage = 1;
-    const pageSize = 500; // Changed from 1000 to 500
+    const pageSize = 500;
+
+    // NEW: DB lookup map (keyed by ASCII == RFIDBOX)
+    let dbMap = new Map(); // key: "PL000123" -> { lot, dept, row, ... }
 
     // NEW: hold last filtered results and an optional lot-type filter
     let lastFiltered = [];
@@ -517,7 +556,6 @@
     socket.on('connect', () => startPolling(60000));
     socket.on('disconnect', () => startPolling(3000));
 
-    // Socket events (throttled + precompute fields)
     socket.on('newTag', tag => {
       const ex = allTags.find(t => t.epcHex === tag.epcHex);
       if (ex) {
@@ -537,23 +575,21 @@
       updateStats();
     });
 
-    // Don’t block on window.onload; wire up on DOMContentLoaded
     document.addEventListener('DOMContentLoaded', () => { init(); });
 
     function init() {
-      // Restore UI state from URL
       restoreStateFromUrl();
 
-      // Initial fetch
-      refreshTags();
+      // Load DB mapping once, then fetch tags
+      loadDbMap().finally(() => {
+        refreshTags();
+      });
 
-      // Events
       document.getElementById('startBtn').addEventListener('click', startScan);
       document.getElementById('pauseBtn').addEventListener('click', pauseScan);
       document.getElementById('stopBtn').addEventListener('click', stopScan);
       document.getElementById('clearBtn').addEventListener('click', clearData);
       document.getElementById('exportBtn').addEventListener('click', exportData);
-      // NEW: export filtered
       document.getElementById('exportFilteredBtn').addEventListener('click', exportFiltered);
 
       document.getElementById('searchBtn').addEventListener('click', () => { currentPage = 1; applyFilter(); });
@@ -562,35 +598,57 @@
         currentPage = 1;
         applyFilter();
       });
-      // Enter-to-search
       document.getElementById('searchInput').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { currentPage = 1; applyFilter(); }
       });
 
       const findBoxBtnEl = document.getElementById('findBoxBtn');
-      if (findBoxBtnEl) {
-        findBoxBtnEl.addEventListener('click', openFindBoxModal);
-      }
+      if (findBoxBtnEl) findBoxBtnEl.addEventListener('click', openFindBoxModal);
+
       document.getElementById('closeFindBox').addEventListener('click', closeFindBoxModal);
       document.getElementById('searchBoxBtn').addEventListener('click', findBox);
+
       document.getElementById('closePopup').addEventListener('click', closeRecordOptionsPopup);
       document.getElementById('popupFindBoxBtn').addEventListener('click', function() {
         stopScan();
         const recordAscii = document.getElementById('popupRecord').innerText;
         window.location.href = "findBox.html?tag=" + encodeURIComponent(recordAscii);
       });
+
       document.getElementById('popupPullSPBtn').addEventListener('click', function() {
-        document.getElementById('sharepointData').style.display = "block";
-        document.getElementById('sharepointData').innerText = "Lot: PL, Type: Standard, Color: Blue, Pounds: 10, Price: $50";
+        const ascii = document.getElementById('popupRecord').innerText.trim().toUpperCase();
+        const info = dbMap.get(ascii);
+        const el = document.getElementById('sharepointData');
+        el.style.display = "block";
+        if (!info) {
+          el.innerText = "No DB match found for: " + ascii;
+          return;
+        }
+        el.innerHTML = `
+          <div style="text-align:left; font-size:14px;">
+            <div><b>LOT:</b> ${escapeHtml(info.lot || "")}</div>
+            <div><b>DEPT:</b> ${escapeHtml(info.dept || "")}</div>
+            <div><b>ROW:</b> ${escapeHtml(info.row || "")}</div>
+            <div><b>DEPT LOT:</b> ${escapeHtml(info.deptLot || "")}</div>
+            <div><b>SUPPLIER:</b> ${escapeHtml(info.supplier || "")}</div>
+            <div><b>TYPE:</b> ${escapeHtml(info.type || "")}</div>
+            <div><b>COLOR:</b> ${escapeHtml(info.color || "")}</div>
+            <div><b>FORMAT:</b> ${escapeHtml(info.format || "")}</div>
+            <div><b>POUNDS:</b> ${escapeHtml(info.pounds || "")}</div>
+            <div><b>PRICE:</b> ${escapeHtml(info.price || "")}</div>
+            <div><b>FREIGHT:</b> ${escapeHtml(info.freight || "")}</div>
+            <div><b>TOLL:</b> ${escapeHtml(info.toll || "")}</div>
+            <div><b>DATE:</b> ${escapeHtml(info.date || "")}</div>
+          </div>
+        `;
       });
-      // Copy ASCII quick hitter
+
       document.getElementById('popupCopyAsciiBtn').addEventListener('click', async () => {
         const txt = document.getElementById('popupRecord').innerText;
         try { await navigator.clipboard.writeText(txt); showTemporaryMessage("ASCII copied", "green"); }
         catch { showTemporaryMessage("Copy failed", "red"); }
       });
 
-      // Future-proof beforeunload
       window.addEventListener("beforeunload", function (e) {
         if (isScanning) {
           e.preventDefault();
@@ -599,8 +657,96 @@
       });
     }
 
-    // Defensive fetch helper
     function safeJson(r){ if(!r.ok) throw new Error(r.status); return r.json(); }
+
+    async function loadDbMap() {
+      // Builds dbMap from /api/db/preview. Key column is RFIDBOX (ASCII).
+      try {
+        const resp = await fetch('/api/db/preview', { cache: 'no-store' });
+        if (!resp.ok) throw new Error("DB preview HTTP " + resp.status);
+        const data = await resp.json();
+
+        const objs = normalizeDbResponseToObjects(data);
+        const nextMap = new Map();
+
+        for (const r of objs) {
+          const key = (getAny(r, ["RFIDBOX","RfidBox","rfidbox"]) || "").toString().trim().toUpperCase();
+          if (!key) continue;
+
+          nextMap.set(key, {
+            // You said RFIDBOX is the ASCII key. The rest are best-effort by common header names.
+            lot:      getAny(r, ["LOT","Lot","RFID","Rfid","Tag","TAG","ASCII","EPC","rfid"]) || "",
+            dept:     getAny(r, ["DEPT","Dept","DEPARTMENT","Department"]) || "",
+            row:      getAny(r, ["ROW","Row"]) || "",
+            deptLot:  getAny(r, ["DEPT LOT","Dept Lot","DEPTLOT","DeptLot"]) || "",
+            supplier: getAny(r, ["SUPPLIER","Supplier","CUSTOMER","Customer"]) || "",
+            type:     getAny(r, ["TYPE","Type","MATERIAL","Material"]) || "",
+            color:    getAny(r, ["COLOR","Color"]) || "",
+            format:   getAny(r, ["FORMAT","Format"]) || "",
+            pounds:   getAny(r, ["POUNDS","Pounds","WEIGHT","Weight"]) || "",
+            price:    getAny(r, ["PRICE","Price"]) || "",
+            freight:  getAny(r, ["FREIGHT","Freight"]) || "",
+            toll:     getAny(r, ["TOLL","Toll","TOLLING","TOLLING "]) || "",
+            date:     getAny(r, ["DATE","Date"]) || ""
+          });
+        }
+
+        dbMap = nextMap;
+        showTemporaryMessage(`DB loaded: ${dbMap.size} rows`, "blue");
+      } catch (e) {
+        console.warn("DB map load failed:", e);
+        showTemporaryMessage("DB load failed (preview not joined)", "orange");
+        dbMap = new Map();
+      }
+    }
+
+    function normalizeDbResponseToObjects(data) {
+      // Supports:
+      // 1) .NET endpoint: array of objects
+      // 2) Node endpoint: { columns: string[], rows: any[][] }
+      if (Array.isArray(data)) return data;
+
+      if (data && Array.isArray(data.columns) && Array.isArray(data.rows)) {
+        const cols = data.columns.map(c => String(c || "").trim());
+        const rows = data.rows;
+
+        return rows.map(arr => {
+          const o = {};
+          for (let i = 0; i < cols.length; i++) {
+            const k = cols[i] || ("COL" + i);
+            const v = Array.isArray(arr) ? arr[i] : "";
+            o[k] = (v === null || v === undefined) ? "" : v;
+          }
+          return o;
+        });
+      }
+
+      return [];
+    }
+
+    function getAny(obj, keys) {
+      for (const k of keys) {
+        if (obj && Object.prototype.hasOwnProperty.call(obj, k)) return obj[k];
+      }
+      // also try case-insensitive lookup
+      if (obj) {
+        const map = new Map(Object.keys(obj).map(x => [x.toLowerCase(), x]));
+        for (const k of keys) {
+          const hit = map.get(String(k).toLowerCase());
+          if (hit) return obj[hit];
+        }
+      }
+      return "";
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
 
     // Timer Functions with Pause/Resume Support
     function startScan() {
@@ -611,11 +757,8 @@
           isScanning = true;
           document.getElementById('scanningStatus').innerText = "🟢 Scanning...";
           document.getElementById('scanningStatus').style.color = "green";
-          if (elapsedTime) {
-            startTime = new Date(new Date() - elapsedTime);
-          } else {
-            startTime = new Date();
-          }
+          if (elapsedTime) startTime = new Date(new Date() - elapsedTime);
+          else startTime = new Date();
           startTimer();
         })
         .catch(() => showTemporaryMessage("Failed to start scan", "red"));
@@ -663,29 +806,54 @@
       window.location = '/api/export';
     }
 
-    // NEW: export current filtered rows (CSV)
     function exportFiltered() {
       const rows = lastFiltered || [];
       if (!rows.length) { showTemporaryMessage("No rows to export", "orange"); return; }
-      const header = ["First Seen","TID (Hex)","EPC (Hex)","ASCII","RSSI","SeenCount"];
+
+      const header = [
+        "First Seen","TID (Hex)","EPC (Hex)","ASCII","RSSI","SeenCount",
+        "LOT","DEPT","ROW","DEPT LOT","SUPPLIER","TYPE","COLOR","FORMAT","POUNDS","PRICE","FREIGHT","TOLL","DATE"
+      ];
       const lines = [header.join(",")];
+
       for (const t of rows) {
+        const asciiKey = (t.epcAscii || "").toString().trim().toUpperCase();
+        const db = dbMap.get(asciiKey) || {};
+
         const cols = [
           t._ts ? new Date(t._ts).toISOString() : "",
           t.tidHex || "",
           t.epcHex || "",
           (t.epcAscii || "").replace(/"/g,'""'),
           (t.rssi ?? "").toString(),
-          (t.seenCount ?? "").toString()
+          (t.seenCount ?? "").toString(),
+
+          (db.lot || "").toString(),
+          (db.dept || "").toString(),
+          (db.row || "").toString(),
+          (db.deptLot || "").toString(),
+          (db.supplier || "").toString(),
+          (db.type || "").toString(),
+          (db.color || "").toString(),
+          (db.format || "").toString(),
+          (db.pounds || "").toString(),
+          (db.price || "").toString(),
+          (db.freight || "").toString(),
+          (db.toll || "").toString(),
+          (db.date || "").toString()
         ];
-        // Basic CSV escaping
-        lines.push(cols.map(v => /[",\n]/.test(v) ? `"${v}"` : v).join(","));
+
+        lines.push(cols.map(v => {
+          const s = String(v ?? "");
+          return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+        }).join(","));
       }
+
       const blob = new Blob([lines.join("\n")], {type:"text/csv;charset=utf-8"});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'filtered_tags.csv';
+      a.download = 'filtered_tags_with_db.csv';
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -718,7 +886,6 @@
       document.getElementById('timer').innerText = `${hrs}:${mins}:${secs}`;
     }
 
-    // Refresh and Filtering (with precompute)
     function refreshTags() {
       fetch('/api/tags')
         .then(r => r.ok ? r.json() : Promise.reject(r.status))
@@ -733,7 +900,6 @@
         .catch(err => console.error("Error fetching tags:", err));
     }
 
-    // NEW: helper for lot type matching
     function matchesLotType(ascii, ltype) {
       if (!ltype) return true;
       if (!ascii) return ltype === 'Other';
@@ -748,9 +914,7 @@
       let filtered = allTags;
 
       if (q) filtered = filtered.filter(t => (t._ascii || "").includes(q));
-      if (lotTypeFilter) {
-        filtered = filtered.filter(t => matchesLotType(t.epcAscii || "", lotTypeFilter));
-      }
+      if (lotTypeFilter) filtered = filtered.filter(t => matchesLotType(t.epcAscii || "", lotTypeFilter));
 
       if (currentSort === 'firstSeen') {
         filtered = [...filtered].sort((a, b) => b._ts - a._ts);
@@ -758,17 +922,16 @@
         filtered = [...filtered].sort((a, b) => (a._ascii || "").localeCompare(b._ascii || ""));
       }
 
-      lastFiltered = filtered; // save for export
+      lastFiltered = filtered;
       renderTags(filtered);
       updateStats();
-
-      // Sync URL state
       syncStateToUrl();
     }
 
     function renderTags(tags) {
       const tbody = document.getElementById('tagsBody');
       tbody.innerHTML = "";
+
       const totalPages = Math.ceil(tags.length / pageSize) || 1;
       if(currentPage > totalPages) currentPage = totalPages;
 
@@ -777,14 +940,31 @@
 
       const frag = document.createDocumentFragment();
       for (const t of pageTags) {
+        const asciiKey = (t.epcAscii || "").toString().trim().toUpperCase();
+        const db = dbMap.get(asciiKey) || {};
+
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>${t._ts ? new Date(t._ts).toLocaleString() : ""}</td>
-          <td>${t.tidHex || ""}</td>
-          <td>${t.epcHex || ""}</td>
-          <td>${t.epcAscii || ""}</td>
-          <td>${t.rssi ?? ""}</td>
-          <td>${t.seenCount ?? ""}</td>
+          <td>${escapeHtml(t.tidHex || "")}</td>
+          <td>${escapeHtml(t.epcHex || "")}</td>
+          <td>${escapeHtml(t.epcAscii || "")}</td>
+          <td>${escapeHtml(t.rssi ?? "")}</td>
+          <td>${escapeHtml(t.seenCount ?? "")}</td>
+
+          <td class="truncate" title="${escapeHtml(db.lot || "")}">${escapeHtml(db.lot || "")}</td>
+          <td class="truncate" title="${escapeHtml(db.dept || "")}">${escapeHtml(db.dept || "")}</td>
+          <td class="truncate" title="${escapeHtml(db.row || "")}">${escapeHtml(db.row || "")}</td>
+          <td class="truncate" title="${escapeHtml(db.deptLot || "")}">${escapeHtml(db.deptLot || "")}</td>
+          <td class="truncate" title="${escapeHtml(db.supplier || "")}">${escapeHtml(db.supplier || "")}</td>
+          <td class="truncate" title="${escapeHtml(db.type || "")}">${escapeHtml(db.type || "")}</td>
+          <td class="truncate" title="${escapeHtml(db.color || "")}">${escapeHtml(db.color || "")}</td>
+          <td class="truncate" title="${escapeHtml(db.format || "")}">${escapeHtml(db.format || "")}</td>
+          <td>${escapeHtml(db.pounds || "")}</td>
+          <td>${escapeHtml(db.price || "")}</td>
+          <td>${escapeHtml(db.freight || "")}</td>
+          <td>${escapeHtml(db.toll || "")}</td>
+          <td class="truncate" title="${escapeHtml(db.date || "")}">${escapeHtml(db.date || "")}</td>
         `;
         tr.addEventListener('click', (e) => { e.stopPropagation(); openRecordOptionsPopup(t); });
         frag.appendChild(tr);
@@ -820,7 +1000,6 @@
       setTimeout(() => { el.style.visibility = "hidden"; }, 3000);
     }
 
-    // Pagination UX polish
     function renderPagination(totalPages, currentPage) {
       const c = document.getElementById('paginationControls');
       c.innerHTML = "";
@@ -845,7 +1024,6 @@
       c.appendChild(mkBtn("Last", () => changePage(totalPages), currentPage === totalPages));
     }
 
-    // Stats update functions - percentages are added
     function updateStats() {
       let pl = 0, ff = 0, bl = 0, gl = 0, other = 0;
       let len8 = 0, len12 = 0, len16 = 0, lenOther = 0;
@@ -864,23 +1042,26 @@
       });
       const totalLot = pl + ff + bl + gl + other;
       const totalLen = len8 + len12 + len16 + lenOther;
+
       document.getElementById('plCount').innerText = pl + " (" + (totalLot ? (pl/totalLot*100).toFixed(1) : 0) + "%)";
       document.getElementById('ffCount').innerText = ff + " (" + (totalLot ? (ff/totalLot*100).toFixed(1) : 0) + "%)";
       document.getElementById('blCount').innerText = bl + " (" + (totalLot ? (bl/totalLot*100).toFixed(1) : 0) + "%)";
       document.getElementById('glCount').innerText = gl + " (" + (totalLot ? (gl/totalLot*100).toFixed(1) : 0) + "%)";
       document.getElementById('otherCount').innerText = other + " (" + (totalLot ? (other/totalLot*100).toFixed(1) : 0) + "%)";
+
       document.getElementById('len8Count').innerText = len8 + " (" + (totalLen ? (len8/totalLen*100).toFixed(1) : 0) + "%)";
       document.getElementById('len12Count').innerText = len12 + " (" + (totalLen ? (len12/totalLen*100).toFixed(1) : 0) + "%)";
       document.getElementById('len16Count').innerText = len16 + " (" + (totalLen ? (len16/totalLen*100).toFixed(1) : 0) + "%)";
       document.getElementById('lenOtherCount').innerText = lenOther + " (" + (totalLen ? (lenOther/totalLen*100).toFixed(1) : 0) + "%)";
+
       document.getElementById('lotTypeTotal').innerText = totalLot;
       document.getElementById('lenTotal').innerText   = totalLen;
       updateLotTypeChart([pl, ff, bl, gl, other]);
     }
-    
+
     function updateLotTypeChart(dataArray) {
       const canvas = document.getElementById('lotTypeChart');
-      if (!canvas) return; // guard if canvas absent
+      if (!canvas) return;
       const ctx = canvas.getContext('2d');
       const total = dataArray.reduce((sum, val) => sum + val, 0);
 
@@ -921,7 +1102,7 @@
             legend: {
               position: 'bottom',
               labels: {
-				font: { size: 16 },
+                font: { size: 16 },
                 generateLabels: function(chart) {
                   const data = chart.data.datasets[0].data;
                   const totalNow = data.reduce((sum, val) => sum + val, 0);
@@ -947,12 +1128,11 @@
               }
             }
           },
-          // NEW: click a slice to toggle the lot type filter
-          onClick: (evt, activeEls) => {
+          onClick: (evt) => {
             const points = lotChart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
             if (!points.length) return;
             const idx = points[0].index;
-            const label = lotChart.data.labels[idx]; // 'PL'|'FF'|'BL'|'GL'|'Other'
+            const label = lotChart.data.labels[idx];
             lotTypeFilter = (lotTypeFilter === label) ? null : label;
             currentPage = 1;
             applyFilter();
@@ -962,7 +1142,6 @@
       });
     }
 
-    // "Find a Box" Modal Functions
     function openRecordOptionsPopup(record) {
       document.getElementById('popupRecord').innerText = record.epcAscii || "";
       document.getElementById('sharepointData').style.display = "none";
@@ -1010,7 +1189,6 @@
       }
     }
 
-    // NEW: URL state (persist q, sort, page, lot type)
     function syncStateToUrl() {
       const params = new URLSearchParams(window.location.search);
       const q = document.getElementById('searchInput').value.trim();
