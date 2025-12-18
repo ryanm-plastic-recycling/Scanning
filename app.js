@@ -301,6 +301,42 @@ app.get("/api/db/preview", async (req, res) => {
 });
 
 /******************************************************
+ * DB FULL ENDPOINT (Node on 3000)
+ * Reads the FULL local Excel file and returns { columns, rows }
+ * Use this for index.html joins (not for rendering huge tables).
+ ******************************************************/
+app.get("/api/db/all", async (req, res) => {
+  try {
+    if (!fs.existsSync(LOCAL_DB_XLSX)) {
+      return res.status(500).json({
+        error: `Local Excel file not found: ${LOCAL_DB_XLSX}. Set env var LOCAL_DB_XLSX to override.`
+      });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(LOCAL_DB_XLSX);
+
+    const ws = workbook.worksheets[0];
+    if (!ws) return res.status(500).json({ error: "No worksheet found in file." });
+
+    const headerRow = ws.getRow(1);
+    const columns = headerRow.values.slice(1).map(v => String(v ?? "").trim());
+
+    const rows = [];
+    for (let r = 2; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r).values.slice(1);
+      // skip fully empty rows
+      if (row.every(v => v === null || v === undefined || String(v).trim() === "")) continue;
+      rows.push(row);
+    }
+
+    res.json({ columns, rows, file: LOCAL_DB_XLSX, totalRows: rows.length });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/******************************************************
  * HELPER FUNCTIONS
  ******************************************************/
 
@@ -435,3 +471,4 @@ server.listen(APP_PORT, () => {
   console.log(`Point your browser to http://localhost:${APP_PORT}/`);
   console.log(`DB Preview reads: ${LOCAL_DB_XLSX} (override with LOCAL_DB_XLSX env var)`);
 });
+
