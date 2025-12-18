@@ -159,7 +159,7 @@
       rowCountEl.textContent = '';
 
       try {
-        const resp = await fetch('http://localhost:5026/api/db/preview');
+        const resp = await fetch('/api/db/preview');
         if (!resp.ok) {
           throw new Error(`Server responded with ${resp.status}`);
         }
