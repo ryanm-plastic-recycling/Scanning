@@ -1,0 +1,12 @@
+{
+  "Version": 1,
+  "Hash": "Ho8FWulVbrEp3Iw7U0BrxvwOJzT7U6CtD4OUQ7BBzGg=",
+  "Source": "InventoryScanningApp",
+  "BasePath": "_content/InventoryScanningApp",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": [],
+  "Endpoints": []
+}
