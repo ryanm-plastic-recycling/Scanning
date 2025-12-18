@@ -317,6 +317,21 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js"></script>
   <script>
+    // Guard against observing a null MutationObserver target to avoid runtime errors.
+    (function applySafeMutationObserver() {
+      const NativeObserver = window.MutationObserver;
+      if (!NativeObserver || !NativeObserver.prototype?.observe) return;
+
+      const originalObserve = NativeObserver.prototype.observe;
+      NativeObserver.prototype.observe = function(target, options) {
+        if (!(target instanceof Node)) {
+          console.warn("MutationObserver skipped because target is not a Node:", target);
+          return;
+        }
+        return originalObserve.call(this, target, options);
+      };
+    })();
+
     let allTags = []; // Master list of tags
     let timerInterval = null;
     let startTime = null;
@@ -324,9 +339,11 @@
     let currentSort = 'firstSeen'; // Default sort order
     let lotChart = null; // (If needed for stats later)
 
+    const hubUrl = "http://localhost:5026/rfidHub";
+
     // Establish SignalR connection to RFID hub
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl("/rfidHub")
+      .withUrl(hubUrl)
       .build();
 
     connection.start().then(() => {
