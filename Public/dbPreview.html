@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DB Preview</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(rgba(255,255,255,0.85), rgba(255,255,255,0.85)),
+                  url('Media/RockvilleFront.jpg') no-repeat center center fixed;
+      background-size: 75% auto;
+      background-position: right;
+      background-attachment: fixed;
+      color: #333;
+    }
+    .left-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 200px;
+      height: 100%;
+      background: rgba(146,208,80,0.95);
+      box-shadow: 2px 0 4px rgba(0,0,0,0.1);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 20px;
+    }
+    .nav-header { margin-bottom: 20px; text-align: center; }
+    .nav-header img { max-width: 80%; height: auto; }
+    .left-nav ul { list-style: none; padding: 0; margin: 0; width: 100%; }
+    .left-nav li { margin: 10px 0; text-align: center; }
+    .left-nav li a {
+      color: #fff;
+      text-decoration: none;
+      font-size: 18px;
+      display: block;
+      padding: 10px 0;
+      transition: background 0.3s;
+    }
+    .left-nav li a:hover { background: rgba(37,64,143,1); }
+    .top-bar {
+      position: fixed;
+      top: 0;
+      left: 200px;
+      width: calc(100% - 200px);
+      height: 110px;
+      background: rgba(146,208,80,0.95);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      z-index: 1000;
+      border-radius: 0;
+    }
+    .top-bar h1 { color: rgba(37,64,143,1); font-size: 36px; margin: 0 auto; text-align: center; flex-grow: 1; }
+    .top-bar img { max-height: 80px; width: auto; }
+    .content { margin: 120px 120px 20px 220px; padding: 20px; }
+    .controls {
+      background: rgba(255,255,255,0.9);
+      border: 1px solid rgba(200,200,200,0.7);
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      padding: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .status { font-weight: bold; }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 10px;
+      background: #fff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    table th, table td {
+      padding: 10px 12px;
+      font-size: 16px;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+    }
+    table th {
+      background-color: #f2f2f2;
+      border-bottom: 2px solid #ddd;
+    }
+    table tr:nth-child(even) { background-color: #f9f9f9; }
+    table tr:hover { background-color: #e9e9e9; }
+    #error { color: red; }
+  </style>
+</head>
+<body>
+  <div class="left-nav">
+    <div class="nav-header">
+      <img src="Media/companylogo.png" alt="Company Logo">
+    </div>
+    <ul>
+      <li><a href="index.html">Scanning</a></li>
+      <li><a href="findBox.html">Find a Box</a></li>
+      <li><a href="sharepoint.html">Scan Data</a></li>
+      <li><a href="liveScan.html">Live Data Scan</a></li>
+      <li><a href="dbPreview.html">DB Preview</a></li>
+    </ul>
+  </div>
+
+  <div class="top-bar">
+    <h1>DB Preview</h1>
+    <img src="Media/grouplogo.png" alt="Group Logo">
+  </div>
+
+  <div class="content">
+    <div class="controls">
+      <button id="refreshBtn">Refresh</button>
+      <span class="status" id="statusText">Loading...</span>
+      <span id="error"></span>
+      <span id="rowCount"></span>
+    </div>
+
+    <table id="dbTable">
+      <thead>
+        <tr>
+          <th>RFID Box</th>
+          <th>RFID</th>
+          <th>Dept</th>
+          <th>Row</th>
+          <th>Dept Lot</th>
+          <th>Supplier</th>
+          <th>Type</th>
+          <th>Color</th>
+          <th>Format</th>
+          <th>Pounds</th>
+          <th>Price</th>
+          <th>Freight</th>
+          <th>Toll</th>
+          <th>Date</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('statusText');
+    const errorEl = document.getElementById('error');
+    const rowCountEl = document.getElementById('rowCount');
+    const tableBody = document.querySelector('#dbTable tbody');
+
+    async function loadPreview() {
+      statusEl.textContent = 'Loading...';
+      errorEl.textContent = '';
+      tableBody.innerHTML = '';
+      rowCountEl.textContent = '';
+
+      try {
+        const resp = await fetch('/api/db/preview');
+        if (!resp.ok) {
+          throw new Error(`Server responded with ${resp.status}`);
+        }
+        const data = await resp.json();
+        renderTable(Array.isArray(data) ? data : []);
+        statusEl.textContent = 'Loaded';
+      } catch (err) {
+        statusEl.textContent = 'Error';
+        errorEl.textContent = err.message;
+      }
+    }
+
+    function renderTable(rows) {
+      const sorted = rows.slice().sort((a, b) => (a.RfidBox || '').localeCompare(b.RfidBox || ''));
+      sorted.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${row.RfidBox || ''}</td>
+          <td>${row.Lot || ''}</td>
+          <td>${row.Dept || ''}</td>
+          <td>${row.Row || ''}</td>
+          <td>${row.DeptLot || ''}</td>
+          <td>${row.Supplier || ''}</td>
+          <td>${row.Type || ''}</td>
+          <td>${row.Color || ''}</td>
+          <td>${row.Format || ''}</td>
+          <td>${row.Pounds || ''}</td>
+          <td>${row.Price || ''}</td>
+          <td>${row.Freight || ''}</td>
+          <td>${row.Toll || ''}</td>
+          <td>${row.Date || ''}</td>
+        `;
+        tableBody.appendChild(tr);
+      });
+
+      rowCountEl.textContent = `Rows: ${sorted.length}`;
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', loadPreview);
+    window.addEventListener('DOMContentLoaded', loadPreview);
+  </script>
+</body>
+</html>

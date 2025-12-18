@@ -207,10 +207,18 @@ public class RFIDService
                         t.AntennaID,
                         t.PeakRSSI,
                         Lot = extraData?["Lot"]?.ToString() ?? "N/A",
+                        Dept = extraData?["Dept"]?.ToString() ?? "N/A",
+                        Row = extraData?["Row"]?.ToString() ?? "N/A",
+                        DeptLot = extraData?["DeptLot"]?.ToString() ?? "N/A",
+                        Supplier = extraData?["Supplier"]?.ToString() ?? "N/A",
                         Type = extraData?["Type"]?.ToString() ?? "N/A",
                         Color = extraData?["Color"]?.ToString() ?? "N/A",
                         Format = extraData?["Format"]?.ToString() ?? "N/A",
                         Pounds = extraData?["Pounds"]?.ToString() ?? "N/A",
+                        Price = extraData?["Price"]?.ToString() ?? "N/A",
+                        Freight = extraData?["Freight"]?.ToString() ?? "N/A",
+                        Toll = extraData?["Toll"]?.ToString() ?? "N/A",
+                        Date = extraData?["Date"]?.ToString() ?? "N/A",
                         Reader = "Primary"
                     };
 
@@ -253,10 +261,18 @@ public class RFIDService
                         t.AntennaID,
                         t.PeakRSSI,
                         Lot = extraData?["Lot"]?.ToString() ?? "N/A",
+                        Dept = extraData?["Dept"]?.ToString() ?? "N/A",
+                        Row = extraData?["Row"]?.ToString() ?? "N/A",
+                        DeptLot = extraData?["DeptLot"]?.ToString() ?? "N/A",
+                        Supplier = extraData?["Supplier"]?.ToString() ?? "N/A",
                         Type = extraData?["Type"]?.ToString() ?? "N/A",
                         Color = extraData?["Color"]?.ToString() ?? "N/A",
                         Format = extraData?["Format"]?.ToString() ?? "N/A",
                         Pounds = extraData?["Pounds"]?.ToString() ?? "N/A",
+                        Price = extraData?["Price"]?.ToString() ?? "N/A",
+                        Freight = extraData?["Freight"]?.ToString() ?? "N/A",
+                        Toll = extraData?["Toll"]?.ToString() ?? "N/A",
+                        Date = extraData?["Date"]?.ToString() ?? "N/A",
                         Reader = "Third"
                     };
 
@@ -327,10 +343,18 @@ public class RFIDService
                 tag.AntennaID,
                 tag.PeakRSSI,
                 Lot = tag.Lot ?? "N/A",
+                Dept = tag.Dept ?? "N/A",
+                Row = tag.Row ?? "N/A",
+                DeptLot = tag.DeptLot ?? "N/A",
+                Supplier = tag.Supplier ?? "N/A",
                 Type = tag.Type ?? "N/A",
                 Color = tag.Color ?? "N/A",
                 Format = tag.Format ?? "N/A",
-                Pounds = tag.Pounds ?? "N/A"
+                Pounds = tag.Pounds ?? "N/A",
+                Price = tag.Price ?? "N/A",
+                Freight = tag.Freight ?? "N/A",
+                Toll = tag.Toll ?? "N/A",
+                Date = tag.Date ?? "N/A"
             };
 
             if (tag.Reader == "Primary")

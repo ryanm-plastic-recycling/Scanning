@@ -1,19 +1,21 @@
-using System.Net.Http;
-using System.Net.Http.Headers;
-using Newtonsoft.Json.Linq;
-using System.Threading.Tasks;
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using ClosedXML.Excel;
+using Newtonsoft.Json.Linq;
 
 public class SharePointExcelService
 {
-    private static HttpClient _httpClient = new HttpClient();
-
     // Cache for Excel rows and lookup dictionary.
     private static JArray? cachedRows;
-    private static Dictionary<string, JObject> cachedLookup = new Dictionary<string, JObject>();
+    private static Dictionary<string, JObject> cachedLookup = new Dictionary<string, JObject>(StringComparer.OrdinalIgnoreCase);
     private static DateTime cacheExpiration = DateTime.MinValue;
     private static readonly TimeSpan cacheDuration = TimeSpan.FromHours(1);
+    private const string WorkbookFileName = "DB.xlsx";
+    private const string WorksheetName = "DB";
+    private const string TableName = "DBRFID";
 
     /// <summary>
     /// Returns extra data for the specified RFID tag from the local cache.
@@ -33,65 +35,137 @@ public class SharePointExcelService
     }
 
     /// <summary>
-    /// Loads the Excel table from Graph and builds a lookup dictionary.
+    /// Returns a snapshot of all cached rows for diagnostics/UI preview.
     /// </summary>
-    private static async Task LoadCacheAsync()
+    public static async Task<JArray> GetAllEntriesAsync()
     {
-        Console.WriteLine("Loading Excel data from Graph...");
-        string graphUrl = "https://graph.microsoft.com/v1.0/drives/b!LWoyGNela0icnELnsn9fq_T-dScYDjNGoowEPLikhf6Ug4zYbAbTQrP5_r8NC_0k/items/013D6T55JX7EPIKX35FJAI5DKFANSQVDBO/workbook/tables/DBRFID/rows?$select=index,values";
-        string token = await GraphAuthHelper.GetAccessTokenAsync();
-        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        var response = await _httpClient.GetAsync(graphUrl);
-        response.EnsureSuccessStatusCode();
-
-        var content = await response.Content.ReadAsStringAsync();
-        JObject data = JObject.Parse(content);
-
-        var valueToken = data["value"];
-        if (valueToken is JArray rows)
+        if (DateTime.UtcNow >= cacheExpiration || cachedRows == null)
         {
-            cachedRows = rows;
-            Console.WriteLine($"Loaded {rows.Count} rows into cache.");
-        }
-        else
-        {
-            cachedRows = new JArray();
-            Console.WriteLine("No rows returned from Excel.");
+            await LoadCacheAsync();
         }
 
-        cachedLookup.Clear();
-        if (cachedRows != null)
+        var rows = new JArray();
+        foreach (var kvp in cachedLookup)
         {
-            int rfidBoxColumnIndex = 18; // Column S (0-indexed)
-            foreach (var row in cachedRows)
+            var entry = new JObject
             {
-                var valuesToken = row["values"];
-                if (valuesToken == null || !valuesToken.HasValues)
+                { "RfidBox", kvp.Key }
+            };
+
+            foreach (var property in kvp.Value)
+            {
+                entry[property.Key] = property.Value;
+            }
+
+            rows.Add(entry);
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Loads the Excel table from the local DB.xlsx file and builds a lookup dictionary.
+    /// </summary>
+    private static Task LoadCacheAsync()
+    {
+        Console.WriteLine("Loading Excel data from local DB.xlsx...");
+
+        string excelPath = Path.Combine(AppContext.BaseDirectory, WorkbookFileName);
+        if (!File.Exists(excelPath))
+        {
+            Console.WriteLine($"Excel file not found at {excelPath}");
+            cachedRows = new JArray();
+            cachedLookup.Clear();
+            cacheExpiration = DateTime.MinValue;
+            return Task.CompletedTask;
+        }
+
+        try
+        {
+            using var workbook = new XLWorkbook(excelPath);
+            var worksheet = workbook.Worksheets.FirstOrDefault(ws =>
+                ws.Name.Equals(WorksheetName, StringComparison.OrdinalIgnoreCase));
+            if (worksheet == null)
+            {
+                Console.WriteLine($"Worksheet '{WorksheetName}' not found in {WorkbookFileName}.");
+                cachedRows = new JArray();
+                cachedLookup.Clear();
+                cacheExpiration = DateTime.MinValue;
+                return Task.CompletedTask;
+            }
+
+            var table = worksheet.Tables
+                .FirstOrDefault(t => t.Name.Equals(TableName, StringComparison.OrdinalIgnoreCase));
+            if (table == null)
+            {
+                Console.WriteLine($"Table '{TableName}' not found in worksheet '{WorksheetName}'.");
+                cachedRows = new JArray();
+                cachedLookup.Clear();
+                cacheExpiration = DateTime.MinValue;
+                return Task.CompletedTask;
+            }
+
+            var headerLookup = table.Fields
+                .Select((field, index) => new { field.Name, Index = index })
+                .ToDictionary(
+                    f => f.Name.Trim(),
+                    f => f.Index,
+                    StringComparer.OrdinalIgnoreCase);
+
+            cachedLookup.Clear();
+
+            foreach (var row in table.DataRange.Rows())
+            {
+                string fileRfid = GetCellValue(row, headerLookup, "RFIDBOX");
+                if (string.IsNullOrWhiteSpace(fileRfid))
                     continue;
 
-                if (valuesToken[0] is JArray rowValues && rowValues.Count > rfidBoxColumnIndex)
+                JObject extraData = new JObject
                 {
-                    string fileRfid = rowValues[rfidBoxColumnIndex]?.ToString()?.Trim() ?? "";
-                    if (!string.IsNullOrEmpty(fileRfid))
-                    {
-                        JObject extraData = new JObject
-                        {
-                            { "Lot", rowValues.Count > 0 ? rowValues[0]?.ToString().Trim() ?? "N/A" : "N/A" },
-                            { "Type", rowValues.Count > 9 ? rowValues[9]?.ToString().Trim() ?? "N/A" : "N/A" },
-                            { "Color", rowValues.Count > 10 ? rowValues[10]?.ToString().Trim() ?? "N/A" : "N/A" },
-                            { "Format", rowValues.Count > 11 ? rowValues[11]?.ToString().Trim() ?? "N/A" : "N/A" },
-                            { "Pounds", rowValues.Count > 14 ? rowValues[14]?.ToString().Trim() ?? "N/A" : "N/A" }
-                        };
+                    { "Lot", GetCellValue(row, headerLookup, "RFID", "N/A") },
+                    { "Dept", GetCellValue(row, headerLookup, "DEPARTMENT", "N/A") },
+                    { "Row", GetCellValue(row, headerLookup, "ROW", "N/A") },
+                    { "DeptLot", GetCellValue(row, headerLookup, "DEPARTMENT LOT", "N/A") },
+                    { "Supplier", GetCellValue(row, headerLookup, "CUSTOMER", "N/A") },
+                    { "Type", GetCellValue(row, headerLookup, "TYPE", "N/A") },
+                    { "Color", GetCellValue(row, headerLookup, "COLOR", "N/A") },
+                    { "Format", GetCellValue(row, headerLookup, "FORMAT", "N/A") },
+                    { "Pounds", GetCellValue(row, headerLookup, "POUNDS", "N/A") },
+                    { "Price", GetCellValue(row, headerLookup, "PRICE", "N/A") },
+                    { "Freight", GetCellValue(row, headerLookup, "FREIGHT", "N/A") },
+                    { "Toll", GetCellValue(row, headerLookup, "TOLLING", "N/A") },
+                    { "Date", GetCellValue(row, headerLookup, "Date", "N/A") }
+                };
 
-                        cachedLookup[fileRfid] = extraData;
-                    }
-                }
+                cachedLookup[fileRfid.Trim()] = extraData;
             }
+
+            cachedRows = new JArray();
+            cacheExpiration = DateTime.UtcNow.Add(cacheDuration);
+            Console.WriteLine($"Finished building local dictionary for RFID lookups. {cachedLookup.Count} entries loaded.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading Excel data: {ex.Message}");
+            cachedRows = new JArray();
+            cachedLookup.Clear();
+            cacheExpiration = DateTime.MinValue;
         }
 
-        cacheExpiration = DateTime.UtcNow.Add(cacheDuration);
-        Console.WriteLine("Finished building local dictionary for RFID lookups.");
+        return Task.CompletedTask;
+    }
+
+    private static string GetCellValue(IXLRangeRow row, Dictionary<string, int> headerLookup, string columnName, string fallback = "")
+    {
+        if (headerLookup.TryGetValue(columnName, out int index))
+        {
+            // ClosedXML rows are 1-based for cells.
+            string value = row.Cell(index + 1).GetString().Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+        }
+
+        return fallback;
     }
 
     /// <summary>
