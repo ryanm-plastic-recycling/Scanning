@@ -313,9 +313,9 @@
     </div>
   </div>
 
-  <!-- Include Socket.IO and SignalR libraries -->
+  <!-- Socket.IO only (Node on 3000) -->
   <script src="/socket.io/socket.io.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js"></script>
+
   <script>
     // Guard against observing a null MutationObserver target to avoid runtime errors.
     (function applySafeMutationObserver() {
@@ -339,25 +339,25 @@
     let currentSort = 'firstSeen'; // Default sort order
     let lotChart = null; // (If needed for stats later)
 
-    const hubUrl = "http://localhost:5026/rfidHub";
+    // Socket.IO connection (same origin: http://localhost:3000)
+    const socket = io();
 
-    // Establish SignalR connection to RFID hub
-    const connection = new signalR.HubConnectionBuilder()
-      .withUrl(hubUrl)
-      .build();
-
-    connection.start().then(() => {
-      console.log("Connected to SignalR hub for live scanning.");
-      // Optionally update status message here
-    }).catch(err => {
-      console.error("SignalR connection error:", err);
+    socket.on("connect", () => {
+      console.log("Socket.IO connected:", socket.id);
     });
 
-    // Listen for live tag updates
-    connection.on("ReceiveTag", function(tag) {
-      // Optionally merge into allTags or simply prepend to table:
+    // Optional: load existing tags when you connect
+    socket.on("initialTags", (tags) => {
+      // Keep it simple: clear & render
+      const tbody = document.querySelector("#scanDataTable tbody");
+      tbody.innerHTML = "";
+      (tags || []).forEach(t => prependTagToTable(t));
+      updateTagCount();
+    });
+
+    // Your Node server emits 'newTag' already -> use it
+    socket.on("newTag", (tag) => {
       prependTagToTable(tag);
-      // You may also update stats if desired.
     });
 
     // Prepend a new tag row to the table
@@ -365,7 +365,7 @@
       const tbody = document.getElementById("scanDataTable").querySelector("tbody");
       const row = document.createElement("tr");
       row.innerHTML = `
-        <td>${new Date().toLocaleString()}</td>
+        <td>${tag.firstSeen ? new Date(tag.firstSeen).toLocaleString() : new Date().toLocaleString()}</td>
         <td>${tag.tidHex || ""}</td>
         <td>${tag.epcHex || ""}</td>
         <td>${tag.epcAscii || ""}</td>
