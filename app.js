@@ -264,6 +264,131 @@ app.get('/api/export', async (req, res) => {
   }
 });
 
+// Export to XLSX (JOINED with DB columns)
+app.get('/api/exportJoined', async (req, res) => {
+  try {
+    // 1) Build DB lookup keyed by RFIDBOX (ASCII)
+    if (!fs.existsSync(LOCAL_DB_XLSX)) {
+      return res.status(500).send(`Local Excel file not found: ${LOCAL_DB_XLSX}`);
+    }
+
+    const dbWb = new ExcelJS.Workbook();
+    await dbWb.xlsx.readFile(LOCAL_DB_XLSX);
+    const ws = dbWb.worksheets[0];
+    if (!ws) return res.status(500).send("No worksheet found in local Excel file.");
+
+    // Read headers
+    const headerRow = ws.getRow(1).values.slice(1).map(v => String(v ?? "").trim());
+    const headerIndex = new Map();
+    headerRow.forEach((h, idx) => headerIndex.set(String(h || "").trim().toUpperCase(), idx));
+
+    // RFIDBOX is the ASCII key column (you confirmed)
+    const keyColIdx = headerIndex.get("RFIDBOX");
+    if (keyColIdx === undefined) {
+      return res.status(500).send("DB sheet missing required header column 'RFIDBOX'.");
+    }
+
+    // Helper to safely read a cell by header name
+    const getByHeader = (rowArr, name) => {
+      const idx = headerIndex.get(String(name).trim().toUpperCase());
+      if (idx === undefined) return "";
+      const v = rowArr[idx];
+      return (v === null || v === undefined) ? "" : String(v);
+    };
+
+    const dbMap = new Map(); // ASCII -> object
+    for (let r = 2; r <= ws.rowCount; r++) {
+      const rowArr = ws.getRow(r).values.slice(1);
+      if (rowArr.every(v => v === null || v === undefined || String(v).trim() === "")) continue;
+
+      const key = (rowArr[keyColIdx] ?? "").toString().trim().toUpperCase();
+      if (!key) continue;
+
+      // Store full row so we can pull any columns you want by header
+      dbMap.set(key, {
+        lot:      getByHeader(rowArr, "LOT") || getByHeader(rowArr, "RFID") || "",
+        dept:     getByHeader(rowArr, "DEPT") || getByHeader(rowArr, "DEPARTMENT") || "",
+        row:      getByHeader(rowArr, "ROW") || "",
+        deptLot:  getByHeader(rowArr, "DEPT LOT") || getByHeader(rowArr, "DEPTLOT") || "",
+        supplier: getByHeader(rowArr, "SUPPLIER") || getByHeader(rowArr, "CUSTOMER") || "",
+        type:     getByHeader(rowArr, "TYPE") || getByHeader(rowArr, "MATERIAL") || "",
+        color:    getByHeader(rowArr, "COLOR") || "",
+        format:   getByHeader(rowArr, "FORMAT") || "",
+        pounds:   getByHeader(rowArr, "POUNDS") || getByHeader(rowArr, "WEIGHT") || "",
+        price:    getByHeader(rowArr, "PRICE") || "",
+        freight:  getByHeader(rowArr, "FREIGHT") || "",
+        toll:     getByHeader(rowArr, "TOLL") || getByHeader(rowArr, "TOLLING") || "",
+        date:     getByHeader(rowArr, "DATE") || ""
+      });
+    }
+
+    // 2) Create workbook for export
+    const outWb = new ExcelJS.Workbook();
+    const sheet = outWb.addWorksheet('FXR90 Tags (Joined)');
+
+    sheet.columns = [
+      { header: 'First Seen', key: 'firstSeen', width: 22 },
+      { header: 'TID (Hex)', key: 'tidHex', width: 35 },
+      { header: 'EPC (Hex)', key: 'epcHex', width: 35 },
+      { header: 'EPC (ASCII)', key: 'epcAscii', width: 20 },
+      { header: 'RSSI', key: 'rssi', width: 10 },
+      { header: 'Seen Count', key: 'seenCount', width: 12 },
+
+      { header: 'LOT', key: 'lot', width: 16 },
+      { header: 'DEPT', key: 'dept', width: 12 },
+      { header: 'ROW', key: 'row', width: 12 },
+      { header: 'DEPT LOT', key: 'deptLot', width: 18 },
+      { header: 'SUPPLIER', key: 'supplier', width: 22 },
+      { header: 'TYPE', key: 'type', width: 18 },
+      { header: 'COLOR', key: 'color', width: 14 },
+      { header: 'FORMAT', key: 'format', width: 14 },
+      { header: 'POUNDS', key: 'pounds', width: 12 },
+      { header: 'PRICE', key: 'price', width: 12 },
+      { header: 'FREIGHT', key: 'freight', width: 12 },
+      { header: 'TOLL', key: 'toll', width: 12 },
+      { header: 'DATE', key: 'date', width: 16 }
+    ];
+
+    // 3) Add rows by joining tag.epcAscii -> dbMap(RFIDBOX)
+    const tags = Object.values(tagStore);
+    for (const t of tags) {
+      const asciiKey = (t.epcAscii || "").toString().trim().toUpperCase();
+      const db = dbMap.get(asciiKey) || {};
+
+      sheet.addRow({
+        firstSeen: t.firstSeen || "",
+        tidHex: t.tidHex || "",
+        epcHex: t.epcHex || "",
+        epcAscii: t.epcAscii || "",
+        rssi: t.rssi ?? "",
+        seenCount: t.seenCount ?? "",
+
+        lot: db.lot || "",
+        dept: db.dept || "",
+        row: db.row || "",
+        deptLot: db.deptLot || "",
+        supplier: db.supplier || "",
+        type: db.type || "",
+        color: db.color || "",
+        format: db.format || "",
+        pounds: db.pounds || "",
+        price: db.price || "",
+        freight: db.freight || "",
+        toll: db.toll || "",
+        date: db.date || ""
+      });
+    }
+
+    const buffer = await outWb.xlsx.writeBuffer();
+    res.setHeader('Content-Disposition', 'attachment; filename="fxr90-tags-joined.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+  } catch (err) {
+    console.error("Error exporting JOINED XLSX:", err);
+    res.status(500).send(String(err?.message || err));
+  }
+});
+
 /******************************************************
  * DB PREVIEW ENDPOINT (Node on 3000)
  * Reads a LOCAL Excel file and returns { columns, rows }
@@ -471,4 +596,5 @@ server.listen(APP_PORT, () => {
   console.log(`Point your browser to http://localhost:${APP_PORT}/`);
   console.log(`DB Preview reads: ${LOCAL_DB_XLSX} (override with LOCAL_DB_XLSX env var)`);
 });
+
 
