@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
-using System.Text.Json; 
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,7 +28,8 @@ builder.Services.AddCors(options =>
                 "https://plasticrecycling.sharepoint.com",
                 "http://localhost:3000")
             .AllowAnyHeader()
-            .AllowAnyMethod());
+            .AllowAnyMethod()
+            .AllowCredentials());
 });
 
 // Add SignalR support.
