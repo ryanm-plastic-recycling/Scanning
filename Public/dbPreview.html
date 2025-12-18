@@ -159,12 +159,26 @@
       rowCountEl.textContent = '';
 
       try {
-        const resp = await fetch('/api/db/preview');
+        const resp = await fetch('/api/db/preview', { cache: 'no-store' });
         if (!resp.ok) {
           throw new Error(`Server responded with ${resp.status}`);
         }
         const data = await resp.json();
-        renderTable(Array.isArray(data) ? data : []);
+
+        // Supports BOTH shapes:
+        // 1) .NET version: Array<object> with fields (RfidBox, Dept, etc.)
+        // 2) Node version: { columns: string[], rows: any[][] }
+        let rowsAsObjects = [];
+
+        if (Array.isArray(data)) {
+          rowsAsObjects = data;
+        } else if (data && Array.isArray(data.rows) && Array.isArray(data.columns)) {
+          rowsAsObjects = mapSheetRowsToObjects(data.columns, data.rows);
+        } else {
+          rowsAsObjects = [];
+        }
+
+        renderTable(rowsAsObjects);
         statusEl.textContent = 'Loaded';
       } catch (err) {
         statusEl.textContent = 'Error';
@@ -172,30 +186,109 @@
       }
     }
 
+    function normalizeHeader(h) {
+      return String(h || '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toLowerCase();
+    }
+
+    function mapSheetRowsToObjects(columns, rows) {
+      // Map Excel headers -> the object fields this page expects
+      // (Loose matching so you don’t have to get header names perfect.)
+      const expected = {
+        rfidbox: 'RfidBox',
+        'rfid box': 'RfidBox',
+        box: 'RfidBox',
+
+        rfid: 'Lot',
+        lot: 'Lot',
+        ascii: 'Lot',
+        'tag id': 'Lot',
+
+        dept: 'Dept',
+        department: 'Dept',
+
+        row: 'Row',
+
+        deptlot: 'DeptLot',
+        'dept lot': 'DeptLot',
+
+        supplier: 'Supplier',
+        customer: 'Supplier',
+
+        type: 'Type',
+        material: 'Type',
+
+        color: 'Color',
+        format: 'Format',
+
+        pounds: 'Pounds',
+        weight: 'Pounds',
+
+        price: 'Price',
+        freight: 'Freight',
+        toll: 'Toll',
+        date: 'Date'
+      };
+
+      const colMap = new Array(columns.length).fill(null);
+      for (let i = 0; i < columns.length; i++) {
+        const key = normalizeHeader(columns[i]);
+        colMap[i] = expected[key] || null;
+      }
+
+      // If we couldn't map anything, at least return a blank array (don’t explode)
+      const mappedCount = colMap.filter(Boolean).length;
+      if (mappedCount === 0) return [];
+
+      return rows.map(r => {
+        const obj = {};
+        for (let i = 0; i < colMap.length; i++) {
+          const field = colMap[i];
+          if (!field) continue;
+          const v = Array.isArray(r) ? r[i] : null;
+          obj[field] = (v === null || v === undefined) ? '' : String(v);
+        }
+        return obj;
+      });
+    }
+
     function renderTable(rows) {
-      const sorted = rows.slice().sort((a, b) => (a.RfidBox || '').localeCompare(b.RfidBox || ''));
+      const safe = Array.isArray(rows) ? rows : [];
+      const sorted = safe.slice().sort((a, b) => (a.RfidBox || '').localeCompare(b.RfidBox || ''));
+
       sorted.forEach(row => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td>${row.RfidBox || ''}</td>
-          <td>${row.Lot || ''}</td>
-          <td>${row.Dept || ''}</td>
-          <td>${row.Row || ''}</td>
-          <td>${row.DeptLot || ''}</td>
-          <td>${row.Supplier || ''}</td>
-          <td>${row.Type || ''}</td>
-          <td>${row.Color || ''}</td>
-          <td>${row.Format || ''}</td>
-          <td>${row.Pounds || ''}</td>
-          <td>${row.Price || ''}</td>
-          <td>${row.Freight || ''}</td>
-          <td>${row.Toll || ''}</td>
-          <td>${row.Date || ''}</td>
+          <td>${escapeHtml(row.RfidBox || '')}</td>
+          <td>${escapeHtml(row.Lot || '')}</td>
+          <td>${escapeHtml(row.Dept || '')}</td>
+          <td>${escapeHtml(row.Row || '')}</td>
+          <td>${escapeHtml(row.DeptLot || '')}</td>
+          <td>${escapeHtml(row.Supplier || '')}</td>
+          <td>${escapeHtml(row.Type || '')}</td>
+          <td>${escapeHtml(row.Color || '')}</td>
+          <td>${escapeHtml(row.Format || '')}</td>
+          <td>${escapeHtml(row.Pounds || '')}</td>
+          <td>${escapeHtml(row.Price || '')}</td>
+          <td>${escapeHtml(row.Freight || '')}</td>
+          <td>${escapeHtml(row.Toll || '')}</td>
+          <td>${escapeHtml(row.Date || '')}</td>
         `;
         tableBody.appendChild(tr);
       });
 
       rowCountEl.textContent = `Rows: ${sorted.length}`;
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
     }
 
     document.getElementById('refreshBtn').addEventListener('click', loadPreview);
