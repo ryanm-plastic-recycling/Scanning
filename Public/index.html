@@ -224,14 +224,15 @@
       gap: 20px;
       flex-wrap: wrap;
       margin-bottom: 20px;
+      align-items: stretch;
     }
-    /* Left Stats: Two distinct boxes stacked vertically */
+    /* Left Stats: stacked */
     #leftStats {
       display: flex;
       flex-direction: column;
       gap: 20px;
       flex: 1;
-      min-width: 250px;
+      min-width: 280px;
     }
     .statsBox {
       background: rgba(255,255,255,0.9);
@@ -248,31 +249,38 @@
     .statsBox table {
       width: 100%;
       border-collapse: collapse;
+      margin-top: 0;
+      box-shadow: none;
     }
     .statsBox table td {
       padding: 5px 10px;
       border-bottom: none;
     }
-    /* Right Stats: For the Pie Chart */
-    #chartContainer {
+
+    /* Right Stats: Charts column */
+    #chartsColumn {
       flex: 1;
-      min-width: 250px;
-      text-align: center;
-      padding: 10px;
+      min-width: 320px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .chartBox {
       background: rgba(255,255,255,0.9);
       border: 1px solid rgba(200,200,200,0.7);
       border-radius: 4px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      padding: 10px;
+      text-align: center;
     }
-    #chartContainer h3 {
-      margin-top: 0;
-      margin-bottom: 10px;
+    .chartBox h3 {
+      margin: 0 0 10px 0;
     }
-    /* Increase the size of the pie chart canvas */
-    #lotTypeChart {
-      width: 400px !important;
-      height: 400px !important;
+    .chartCanvas {
+      width: 360px !important;
+      height: 360px !important;
     }
+
     /* Modal for inline Record Options */
     #recordOptionsPopup {
       position: fixed;
@@ -347,11 +355,9 @@
       font-weight: 700;
       border-top: 2px solid #ddd;
     }
-    /* Tiny CSS win: clickable rows */
     #tagsTable tbody tr { cursor: pointer; }
-    /* Allow horizontal scroll if you add a lot of columns */
+
     .tableWrap { overflow-x: auto; }
-    /* Prevent long values from bulldozing the table */
     .truncate {
       max-width: 220px;
       overflow: hidden;
@@ -382,7 +388,7 @@
 
   <!-- Main Content -->
   <div class="content">
-    <!-- Main Controls: Buttons and Timer/Status -->
+    <!-- Main Controls -->
     <div class="controls" id="mainControls">
       <div id="leftControls">
         <button id="startBtn">Start</button>
@@ -400,7 +406,6 @@
       <div id="rightControls">
         <button id="clearBtn">Clear Data</button>
         <button id="exportBtn">Export XLSX</button>
-        <!-- NEW: Export Filtered -->
         <button id="exportFilteredBtn">Export Filtered</button>
       </div>
     </div>
@@ -410,7 +415,6 @@
 
     <!-- Stats Section -->
     <div id="statsContainer">
-      <!-- Left Stats: Two distinct boxes for ASCII Lot Types and ASCII Lengths -->
       <div id="leftStats">
         <div class="statsBox" id="lotTypeStats">
           <h3>ASCII Lot Types</h3>
@@ -434,16 +438,35 @@
             <tr class="total-row"><td>Total:</td><td id="lenTotal">0</td></tr>
           </table>
         </div>
+
+        <div class="statsBox" id="totalsBox">
+          <h3>Totals (DB-Joined)</h3>
+          <table>
+            <tr><td>Total Pounds:</td><td id="totalPounds">0</td></tr>
+            <tr><td>Total Value (Pounds × Price):</td><td id="totalValue">$0.00</td></tr>
+          </table>
+        </div>
       </div>
 
-      <!-- Right Stats: Lot Type Pie Chart -->
-      <div class="statsBox" id="chartContainer">
-        <h3>Lot Type Pie Chart</h3>
-        <canvas id="lotTypeChart" width="400" height="400"></canvas>
+      <div id="chartsColumn">
+        <div class="chartBox" id="chartContainer">
+          <h3>Lot Type Pie Chart</h3>
+          <canvas id="lotTypeChart" class="chartCanvas" width="360" height="360"></canvas>
+        </div>
+
+        <div class="chartBox">
+          <h3>Type Pie Chart</h3>
+          <canvas id="typeChart" class="chartCanvas" width="360" height="360"></canvas>
+        </div>
+
+        <div class="chartBox">
+          <h3>Color Pie Chart</h3>
+          <canvas id="colorChart" class="chartCanvas" width="360" height="360"></canvas>
+        </div>
       </div>
     </div>
 
-    <!-- Search Controls Row -->
+    <!-- Search Controls -->
     <div class="controls search-controls">
       <label for="searchInput">Search ASCII:</label>
       <input id="searchInput" type="text" placeholder="e.g. PL002314" />
@@ -465,7 +488,6 @@
             <th>RSSI</th>
             <th>SeenCount</th>
 
-            <!-- Joined from DB (key = RFIDBOX == ASCII) -->
             <th>LOT</th>
             <th>DEPT</th>
             <th>ROW</th>
@@ -481,13 +503,10 @@
             <th>DATE</th>
           </tr>
         </thead>
-        <tbody id="tagsBody">
-          <!-- Populated by JavaScript -->
-        </tbody>
+        <tbody id="tagsBody"></tbody>
       </table>
     </div>
 
-    <!-- Pagination Controls (dynamically rendered) -->
     <div id="paginationControls"></div>
   </div>
 
@@ -514,28 +533,31 @@
     </div>
   </div>
 
-  <!-- Include Socket.IO client library -->
+  <!-- Socket.IO client -->
   <script src="/socket.io/socket.io.js"></script>
 
   <script>
-    let allTags = []; // master list
+    let allTags = [];
     let timerInterval = null;
     let startTime = null;
     let elapsedTime = 0;
     let isScanning = false;
-    let currentSort = 'firstSeen'; // default sort
+    let currentSort = 'firstSeen';
     let lotChart = null;
+    let typeChart = null;
+    let colorChart = null;
+
     let currentPage = 1;
     const pageSize = 500;
 
-    // NEW: DB lookup map (keyed by ASCII == RFIDBOX)
-    let dbMap = new Map(); // key: "PL000123" -> { lot, dept, row, ... }
-
-    // NEW: hold last filtered results and an optional lot-type filter
+    let dbMap = new Map(); // key: ASCII (RFIDBOX)
     let lastFiltered = [];
-    let lotTypeFilter = null; // 'PL'|'FF'|'BL'|'GL'|'Other'|null
+    let lotTypeFilter = null;
 
-    // Throttle UI work from socket/poll
+    // Stats throttle (prevents chart redraw storms)
+    let lastStatsAt = 0;
+    const STATS_MIN_INTERVAL_MS = 500;
+
     let pendingRerender = false;
     function scheduleRerender() {
       if (pendingRerender) return;
@@ -546,7 +568,6 @@
       });
     }
 
-    // Socket & polling coordination
     const socket = io();
     let pollTimer = null;
     function startPolling(intervalMs = 60000) {
@@ -568,22 +589,19 @@
       }
       scheduleRerender();
     });
+
     socket.on('clearData', function() {
       allTags = [];
       renderTags([]);
       resetTimerDisplay();
-      updateStats();
+      updateStats(true);
     });
 
     document.addEventListener('DOMContentLoaded', () => { init(); });
 
     function init() {
       restoreStateFromUrl();
-
-      // Load DB mapping once, then fetch tags
-      loadDbMap().finally(() => {
-        refreshTags();
-      });
+      loadDbMap().finally(() => refreshTags());
 
       document.getElementById('startBtn').addEventListener('click', startScan);
       document.getElementById('pauseBtn').addEventListener('click', pauseScan);
@@ -601,9 +619,6 @@
       document.getElementById('searchInput').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { currentPage = 1; applyFilter(); }
       });
-
-      const findBoxBtnEl = document.getElementById('findBoxBtn');
-      if (findBoxBtnEl) findBoxBtnEl.addEventListener('click', openFindBoxModal);
 
       document.getElementById('closeFindBox').addEventListener('click', closeFindBoxModal);
       document.getElementById('searchBoxBtn').addEventListener('click', findBox);
@@ -660,10 +675,10 @@
     function safeJson(r){ if(!r.ok) throw new Error(r.status); return r.json(); }
 
     async function loadDbMap() {
-      // Builds dbMap from /api/db/preview. Key column is RFIDBOX (ASCII).
       try {
-        const resp = await fetch('/api/db/preview', { cache: 'no-store' });
-        if (!resp.ok) throw new Error("DB preview HTTP " + resp.status);
+        // FULL DB for scanning/join:
+        const resp = await fetch('/api/db/all', { cache: 'no-store' });
+        if (!resp.ok) throw new Error("DB HTTP " + resp.status);
         const data = await resp.json();
 
         const objs = normalizeDbResponseToObjects(data);
@@ -674,8 +689,7 @@
           if (!key) continue;
 
           nextMap.set(key, {
-            // You said RFIDBOX is the ASCII key. The rest are best-effort by common header names.
-            lot:      getAny(r, ["LOT","Lot","RFID","Rfid","Tag","TAG","ASCII","EPC","rfid"]) || "",
+            lot:      getAny(r, ["LOT","Lot","RFID","Rfid","Tag","TAG","ASCII"]) || "",
             dept:     getAny(r, ["DEPT","Dept","DEPARTMENT","Department"]) || "",
             row:      getAny(r, ["ROW","Row"]) || "",
             deptLot:  getAny(r, ["DEPT LOT","Dept Lot","DEPTLOT","DeptLot"]) || "",
@@ -695,22 +709,16 @@
         showTemporaryMessage(`DB loaded: ${dbMap.size} rows`, "blue");
       } catch (e) {
         console.warn("DB map load failed:", e);
-        showTemporaryMessage("DB load failed (preview not joined)", "orange");
+        showTemporaryMessage("DB load failed (joins/charts limited)", "orange");
         dbMap = new Map();
       }
     }
 
     function normalizeDbResponseToObjects(data) {
-      // Supports:
-      // 1) .NET endpoint: array of objects
-      // 2) Node endpoint: { columns: string[], rows: any[][] }
       if (Array.isArray(data)) return data;
-
       if (data && Array.isArray(data.columns) && Array.isArray(data.rows)) {
         const cols = data.columns.map(c => String(c || "").trim());
-        const rows = data.rows;
-
-        return rows.map(arr => {
+        return data.rows.map(arr => {
           const o = {};
           for (let i = 0; i < cols.length; i++) {
             const k = cols[i] || ("COL" + i);
@@ -720,7 +728,6 @@
           return o;
         });
       }
-
       return [];
     }
 
@@ -728,7 +735,6 @@
       for (const k of keys) {
         if (obj && Object.prototype.hasOwnProperty.call(obj, k)) return obj[k];
       }
-      // also try case-insensitive lookup
       if (obj) {
         const map = new Map(Object.keys(obj).map(x => [x.toLowerCase(), x]));
         for (const k of keys) {
@@ -748,59 +754,56 @@
         .replaceAll("'", '&#39;');
     }
 
-    // Timer Functions with Pause/Resume Support
+    function parseNumberLoose(v) {
+      if (v === null || v === undefined) return 0;
+      const s = String(v).trim();
+      if (!s) return 0;
+      // remove $ , and spaces
+      const cleaned = s.replace(/[$, ]+/g, '').replace(/[^\d.\-]/g, '');
+      const n = parseFloat(cleaned);
+      return Number.isFinite(n) ? n : 0;
+    }
+
     function startScan() {
-      fetch('/api/start')
-        .then(safeJson)
-        .then(data => {
-          showTemporaryMessage(data.message || "Started", "green");
-          isScanning = true;
-          document.getElementById('scanningStatus').innerText = "🟢 Scanning...";
-          document.getElementById('scanningStatus').style.color = "green";
-          if (elapsedTime) startTime = new Date(new Date() - elapsedTime);
-          else startTime = new Date();
-          startTimer();
-        })
-        .catch(() => showTemporaryMessage("Failed to start scan", "red"));
+      fetch('/api/start').then(safeJson).then(data => {
+        showTemporaryMessage(data.message || "Started", "green");
+        isScanning = true;
+        document.getElementById('scanningStatus').innerText = "🟢 Scanning...";
+        document.getElementById('scanningStatus').style.color = "green";
+        if (elapsedTime) startTime = new Date(new Date() - elapsedTime);
+        else startTime = new Date();
+        startTimer();
+      }).catch(() => showTemporaryMessage("Failed to start scan", "red"));
     }
     function pauseScan() {
-      fetch('/api/pause')
-        .then(safeJson)
-        .then(data => {
-          showTemporaryMessage(data.message || "Paused", "orange");
-          isScanning = false;
-          document.getElementById('scanningStatus').innerText = "🟠 Paused";
-          document.getElementById('scanningStatus').style.color = "orange";
-          elapsedTime = new Date() - startTime;
-          stopTimer();
-        })
-        .catch(() => showTemporaryMessage("Failed to pause scan", "red"));
+      fetch('/api/pause').then(safeJson).then(data => {
+        showTemporaryMessage(data.message || "Paused", "orange");
+        isScanning = false;
+        document.getElementById('scanningStatus').innerText = "🟠 Paused";
+        document.getElementById('scanningStatus').style.color = "orange";
+        elapsedTime = new Date() - startTime;
+        stopTimer();
+      }).catch(() => showTemporaryMessage("Failed to pause scan", "red"));
     }
     function stopScan() {
-      fetch('/api/stop')
-        .then(safeJson)
-        .then(data => {
-          showTemporaryMessage(data.message || "Stopped", "red");
-          isScanning = false;
-          document.getElementById('scanningStatus').innerText = "🔴 Not Scanning";
-          document.getElementById('scanningStatus').style.color = "red";
-          stopTimer();
-          elapsedTime = 0;
-        })
-        .catch(() => showTemporaryMessage("Failed to stop scan", "red"));
+      fetch('/api/stop').then(safeJson).then(data => {
+        showTemporaryMessage(data.message || "Stopped", "red");
+        isScanning = false;
+        document.getElementById('scanningStatus').innerText = "🔴 Not Scanning";
+        document.getElementById('scanningStatus').style.color = "red";
+        stopTimer();
+        elapsedTime = 0;
+      }).catch(() => showTemporaryMessage("Failed to stop scan", "red"));
     }
     function clearData() {
       if (!confirm("Are you sure you want to CLEAR all data?")) return;
-      fetch('/api/clear')
-        .then(safeJson)
-        .then(data => {
-          showTemporaryMessage(data.message || "Cleared", "blue");
-          allTags = [];
-          renderTags([]);
-          resetTimerDisplay();
-          updateStats();
-        })
-        .catch(() => showTemporaryMessage("Failed to clear data", "red"));
+      fetch('/api/clear').then(safeJson).then(data => {
+        showTemporaryMessage(data.message || "Cleared", "blue");
+        allTags = [];
+        renderTags([]);
+        resetTimerDisplay();
+        updateStats(true);
+      }).catch(() => showTemporaryMessage("Failed to clear data", "red"));
     }
     function exportData() {
       window.location = '/api/export';
@@ -924,7 +927,7 @@
 
       lastFiltered = filtered;
       renderTags(filtered);
-      updateStats();
+      updateStats(false);
       syncStateToUrl();
     }
 
@@ -1024,22 +1027,55 @@
       c.appendChild(mkBtn("Last", () => changePage(totalPages), currentPage === totalPages));
     }
 
-    function updateStats() {
+    function updateStats(force) {
+      const now = Date.now();
+      if (!force && (now - lastStatsAt) < STATS_MIN_INTERVAL_MS) return;
+      lastStatsAt = now;
+
+      // Lot types + lengths based on scanned ASCII
       let pl = 0, ff = 0, bl = 0, gl = 0, other = 0;
       let len8 = 0, len12 = 0, len16 = 0, lenOther = 0;
-      allTags.forEach(tag => {
+
+      // Type + Color distributions based on DB-joined data
+      const typeCounts = new Map();
+      const colorCounts = new Map();
+
+      // Totals based on DB-joined pounds/price
+      let totalPounds = 0;
+      let totalValue = 0;
+
+      for (const tag of allTags) {
         const ascii = tag.epcAscii || "";
+
         if(ascii.startsWith("PL")) pl++;
         else if(ascii.startsWith("FF")) ff++;
         else if(ascii.startsWith("BL")) bl++;
         else if(ascii.startsWith("GL")) gl++;
         else other++;
+
         const len = ascii.length;
         if(len === 8) len8++;
         else if(len === 12) len12++;
         else if(len === 16) len16++;
         else lenOther++;
-      });
+
+        const asciiKey = ascii.toString().trim().toUpperCase();
+        const db = dbMap.get(asciiKey);
+
+        const t = (db && db.type ? String(db.type).trim() : "") || "Unknown";
+        const c = (db && db.color ? String(db.color).trim() : "") || "Unknown";
+
+        typeCounts.set(t, (typeCounts.get(t) || 0) + 1);
+        colorCounts.set(c, (colorCounts.get(c) || 0) + 1);
+
+        if (db) {
+          const pds = parseNumberLoose(db.pounds);
+          const prc = parseNumberLoose(db.price);
+          totalPounds += pds;
+          totalValue += (pds * prc);
+        }
+      }
+
       const totalLot = pl + ff + bl + gl + other;
       const totalLen = len8 + len12 + len16 + lenOther;
 
@@ -1056,7 +1092,43 @@
 
       document.getElementById('lotTypeTotal').innerText = totalLot;
       document.getElementById('lenTotal').innerText   = totalLen;
+
+      document.getElementById('totalPounds').innerText = totalPounds.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      document.getElementById('totalValue').innerText  = totalValue.toLocaleString(undefined, { style: "currency", currency: "USD" });
+
       updateLotTypeChart([pl, ff, bl, gl, other]);
+
+      const typeTop = topNWithUnknownFirst(typeCounts, 10);
+      updateGenericPieChart("typeChart", "Type", typeTop.labels, typeTop.values, (c) => typeChart = c, () => typeChart);
+
+      const colorTop = topNWithUnknownFirst(colorCounts, 10);
+      updateGenericPieChart("colorChart", "Color", colorTop.labels, colorTop.values, (c) => colorChart = c, () => colorChart);
+    }
+
+    function topNWithUnknownFirst(countMap, n) {
+      const entries = Array.from(countMap.entries());
+      entries.sort((a, b) => b[1] - a[1]);
+
+      // pull Unknown to front if present
+      const unknownIdx = entries.findIndex(e => String(e[0]).toLowerCase() === "unknown");
+      if (unknownIdx > 0) {
+        const u = entries.splice(unknownIdx, 1)[0];
+        entries.unshift(u);
+      }
+
+      const top = entries.slice(0, n);
+      const rest = entries.slice(n);
+      const restTotal = rest.reduce((s, e) => s + e[1], 0);
+
+      const labels = top.map(e => e[0]);
+      const values = top.map(e => e[1]);
+
+      if (restTotal > 0) {
+        labels.push("Other");
+        values.push(restTotal);
+      }
+
+      return { labels, values };
     }
 
     function updateLotTypeChart(dataArray) {
@@ -1102,29 +1174,7 @@
             legend: {
               position: 'bottom',
               labels: {
-                font: { size: 16 },
-                generateLabels: function(chart) {
-                  const data = chart.data.datasets[0].data;
-                  const totalNow = data.reduce((sum, val) => sum + val, 0);
-                  const items = chart.data.labels.map((label, i) => {
-                    const value = data[i] || 0;
-                    const percentage = totalNow ? ((value / totalNow) * 100).toFixed(1) : 0;
-                    return {
-                      text: label + ': ' + value + ' (' + percentage + '%)',
-                      fillStyle: chart.data.datasets[0].backgroundColor[i],
-                      strokeStyle: chart.data.datasets[0].backgroundColor[i],
-                      lineWidth: 1,
-                      index: i
-                    };
-                  });
-                  items.push({
-                    text: 'Total: ' + totalNow,
-                    fillStyle: 'rgba(0,0,0,0)',
-                    strokeStyle: 'rgba(0,0,0,0)',
-                    lineWidth: 0,
-                  });
-                  return items;
-                }
+                font: { size: 14 }
               }
             }
           },
@@ -1142,6 +1192,43 @@
       });
     }
 
+    function updateGenericPieChart(canvasId, title, labels, values, setChart, getChart) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+
+      const existing = getChart();
+      if (existing) {
+        existing.data.labels = labels;
+        existing.data.datasets[0].data = values;
+        existing.update();
+        return;
+      }
+
+      const chart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: values
+          }]
+        },
+        options: {
+          responsive: false,
+          maintainAspectRatio: false,
+          animation: { duration: 200 },
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { font: { size: 14 } }
+            }
+          }
+        }
+      });
+
+      setChart(chart);
+    }
+
     function openRecordOptionsPopup(record) {
       document.getElementById('popupRecord').innerText = record.epcAscii || "";
       document.getElementById('sharepointData').style.display = "none";
@@ -1150,9 +1237,6 @@
     }
     function closeRecordOptionsPopup() {
       document.getElementById('recordOptionsPopup').style.display = "none";
-    }
-    function openFindBoxModal() {
-      document.getElementById('findBoxModal').style.display = "flex";
     }
     function closeFindBoxModal() {
       document.getElementById('findBoxModal').style.display = "none";
