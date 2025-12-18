@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" charset="utf-8">
+  <title>Find a Box</title>
+  <!-- Chart.js with local fallback -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"
+    defer
+    onload="console.log('Chart.js loaded', window.Chart?.version)"
+    onerror="(()=>{const s=document.createElement('script'); s.src='/libs/chart.umd.min.js'; s.defer=true; s.onload=()=>console.log('Chart.js loaded (local)', window.Chart?.version); document.head.appendChild(s);})()">
+  </script>
+
+  <style>
+    /* Base and Background */
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(rgba(255,255,255,0.85), rgba(255,255,255,0.85)),
+                  url('Media/RockvilleFront.jpg') no-repeat center center fixed;
+      background-size: 75% auto;
+      background-position: right;
+      background-attachment: fixed;
+      color: #333;
+    }
+    /* Left Navigation Pane */
+    .left-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 200px;
+      height: 100%;
+      background: rgba(146,208,80,0.95);
+      box-shadow: 2px 0 4px rgba(0,0,0,0.1);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 20px;
+    }
+    .nav-header { margin-bottom: 20px; text-align: center; }
+    .nav-header img { max-width: 80%; height: auto; }
+    .left-nav ul { list-style: none; padding: 0; margin: 0; width: 100%; }
+    .left-nav li { margin: 10px 0; text-align: center; }
+    .left-nav li a {
+      color: #fff; text-decoration: none; font-size: 18px; display: block; padding: 10px 0; transition: background 0.3s;
+    }
+    .left-nav li a:hover { background: rgba(37,64,143,1); }
+
+    /* Top Bar */
+    .top-bar {
+      position: fixed; top: 0; left: 200px; width: calc(100% - 200px); height: 110px;
+      background: rgba(146,208,80,0.95); box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      display: flex; align-items: center; justify-content: space-between; padding: 0 20px; z-index: 1000;
+    }
+    .top-bar h1 { color: rgba(37,64,143,1); font-size: 36px; margin: 0 auto; text-align: center; flex-grow: 1; }
+    .top-bar img { max-height: 80px; width: auto; }
+
+    /* Main Content */
+    .content { margin: 120px 120px 20px 220px; padding: 20px; }
+
+    /* Controls */
+    .controls {
+      background: rgba(255,255,255,0.9); border: 1px solid rgba(200,200,200,0.7);
+      border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      padding: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px;
+    }
+    .controls button {
+      font-size: 20px; padding: 12px 24px; border: none; background-color: rgba(37,64,143,1);
+      color: #fff; border-radius: 4px; cursor: pointer; transition: transform 0.3s ease, background-color 0.3s ease;
+    }
+    .controls button:hover { background-color: rgba(37,64,143,0.9); transform: translateY(-2px); }
+    .controls label { font-size: 18px; font-weight: bold; }
+    .controls input { width: 200px; font-size: 16px; padding: 8px; }
+
+    /* Status */
+    #scanningFlag { font-size: 24px; font-weight: bold; margin-left: 20px; }
+    #findBoxTimer { font-size: 20px; margin-left: 10px; color: #555; }
+    #statusTextContainer { display: block; text-align: center; margin-bottom: 10px; }
+
+    /* Signal Bar */
+    #signalBarWrapper { text-align: center; }
+    #signalBarContainer {
+      position: relative; width: 500px; height: 30px; background-color: #ddd; margin: 0 auto; border-radius: 4px;
+    }
+    #currentMarker, #maxMarker, #minMarker { position: absolute; top: 0; height: 100%; width: 2px; }
+    #currentMarker { background-color: green; }
+    #maxMarker { background-color: red; }
+    #minMarker { background-color: blue; }
+    #signalBarValues { margin-top: 5px; font-size: 16px; }
+
+    /* Chart */
+    #rssiChartContainer {
+      background: rgba(255,255,255,0.9); border: 1px solid rgba(200,200,200,0.7);
+      border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 20px; margin-top: 20px; text-align: center;
+      width: 1100px; height: 600px; margin-left: auto; margin-right: auto;
+    }
+    #rssiChart { width: 100% !important; height: 100% !important; }
+  </style>
+</head>
+<body>
+  <!-- Left Navigation Pane -->
+  <div class="left-nav">
+    <div class="nav-header">
+      <img src="Media/companylogo.png" alt="Company Logo">
+    </div>
+    <ul>
+      <li><a href="index.html" class="navLink">Scanning</a></li>
+      <li><a href="findBox.html" class="navLink">Find a Box</a></li>
+      <li><a href="sharepoint.html" class="navLink">Scan Data</a></li>
+      <li><a href="liveScan.html" class="navLink">Live Data Scan</a></li>
+    </ul>
+  </div>
+
+  <!-- Top Bar -->
+  <div class="top-bar">
+    <h1>Find a Box</h1>
+    <img src="Media/grouplogo.png" alt="Group Logo">
+  </div>
+
+  <!-- Main Content -->
+  <div class="content">
+    <!-- Find a Box Controls -->
+    <div class="controls">
+      <label for="findBoxInput">Enter ASCII Tag:</label>
+      <input type="text" id="findBoxInput" placeholder="e.g. PL111222">
+      <button id="startSearchBtn">Start Search</button>
+      <button id="stopSearchBtn">Stop Search</button>
+    </div>
+
+    <!-- Status and Signal Bar -->
+    <div class="controls" id="bestMatchStatus">
+      <div id="statusTextContainer">
+        <span id="bestMatchText">No box found yet.</span><br>
+        <span id="scanningFlag">Not Scanning</span>
+        <span id="findBoxTimer">00:00:00</span>
+      </div>
+      <div id="signalBarWrapper">
+        <div id="signalBarContainer">
+          <div id="currentMarker"></div>
+          <div id="maxMarker"></div>
+          <div id="minMarker"></div>
+        </div>
+        <div id="signalBarValues">
+          <span id="currentValueText">Current: -100 dBm</span> |
+          <span id="maxValueText">Max: -100 dBm</span> |
+          <span id="minValueText">Min: -100 dBm</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- RSSI Chart -->
+    <div id="rssiChartContainer">
+      <h3>RSSI Over Last 60 Seconds</h3>
+      <canvas id="rssiChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Socket.IO -->
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    /* ======================
+       A) CONFIG & HELPERS
+       ====================== */
+    // --- RSSI config ---
+    const RSSI_CLAMP_MIN = -100;  // hard floor shown
+    const RSSI_CLAMP_MAX =  -50;  // hard ceiling shown
+    const EMA_ALPHA = 0.3;        // 0.2–0.4 is a good range
+
+    let findBoxTags = [];
+    let bestRSSI = -100;          // raw best
+    let emaRSSI  = -100;          // smoothed
+    let rssiData = [];
+    let rssiDataEma = [];
+    let timeLabels = [];
+    let rssiChart = null;
+    let chartInterval = null;
+    let scanningActive = false;
+    let currentMinRSSI = -100;
+    let currentMaxRSSI = -100;
+    let lastTagTimestamp = 0;
+    let findBoxStartTime = 0;
+
+    function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+    function convertRSSIToPercentage(rssi) {
+      const v = clamp(rssi, RSSI_CLAMP_MIN, RSSI_CLAMP_MAX);
+      const pct = Math.round(((v - RSSI_CLAMP_MIN) / (RSSI_CLAMP_MAX - RSSI_CLAMP_MIN)) * 100);
+      return clamp(pct, 0, 100);
+    }
+
+    /* ======================
+       SOCKET SETUP
+       ====================== */
+    const socket = io();
+    socket.on('connect', function() {
+      console.log('Socket connected. ID:', socket.id);
+    });
+    socket.on('connect_error', function(err) {
+      console.error('Socket connection error:', err);
+    });
+
+    /* ======================
+       D) START / STOP + LOOP
+       ====================== */
+    function startSearch() {
+      const searchText = document.getElementById('findBoxInput').value.trim().toLowerCase();
+      if (!searchText) { alert("Please enter an ASCII tag value."); return; }
+      if (!rssiChart) { console.warn('Chart not ready yet'); return; }
+
+      scanningActive = true;
+      findBoxTags = [];
+      bestRSSI = -100;
+      emaRSSI  = -100;
+      currentMinRSSI = -100;
+      currentMaxRSSI = -100;
+      lastTagTimestamp = Date.now();
+      findBoxStartTime = Date.now();
+
+      document.getElementById('bestMatchText').innerText = "Scanning...";
+      document.getElementById('scanningFlag').innerText = "🔎📶 Scanning";
+      document.getElementById('scanningFlag').style.color = "green";
+
+      // Reset chart arrays
+      rssiData.fill(-100);
+      rssiDataEma.fill(-100);
+      const now = new Date();
+      for (let i = 59; i >= 0; i--) {
+        let past = new Date(now.getTime() - i * 1000);
+        timeLabels[59 - i] = past.toLocaleTimeString();
+      }
+      rssiChart.update('none');
+
+      socket.emit('startFindBoxScan', { filter: searchText });
+
+      if (chartInterval) clearInterval(chartInterval);
+      chartInterval = setInterval(() => {
+        // If no tag update for >3 sec, decay toward -100 so the UI shows "cold"
+        if (Date.now() - lastTagTimestamp > 3000) {
+          bestRSSI = Math.max(bestRSSI - 2, -100);
+          emaRSSI  = Math.max(emaRSSI - 1.5, -100);
+          currentMinRSSI = Math.max(currentMinRSSI - 1, -100);
+          currentMaxRSSI = Math.max(currentMaxRSSI - 1, -100);
+        }
+
+        // Push latest points
+        rssiData.shift();     rssiData.push(clamp(bestRSSI, RSSI_CLAMP_MIN, RSSI_CLAMP_MAX));
+        rssiDataEma.shift();  rssiDataEma.push(clamp(emaRSSI,  RSSI_CLAMP_MIN, RSSI_CLAMP_MAX));
+        timeLabels.shift();   timeLabels.push(new Date().toLocaleTimeString());
+
+        rssiChart.update('none');
+        updateSignalBarMarkers(emaRSSI); // use smoothed for bar
+
+        document.getElementById('bestMatchText').innerText = "Best match RSSI: " + emaRSSI.toFixed(1) + " dBm";
+        const elapsed = Math.floor((Date.now() - findBoxStartTime) / 1000);
+        const hrs  = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+        const mins = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+        const secs = String(elapsed % 60).padStart(2, '0');
+        document.getElementById('findBoxTimer').innerText = `${hrs}:${mins}:${secs}`;
+      }, 1000);
+    }
+
+    function stopSearch() {
+      scanningActive = false;
+      if (chartInterval) { clearInterval(chartInterval); chartInterval = null; }
+      socket.emit('stopFindBoxScan');
+      document.getElementById('bestMatchText').innerText = "Scan stopped.";
+      document.getElementById('scanningFlag').innerText = "🛑 Stopped";
+      document.getElementById('scanningFlag').style.color = "red";
+    }
+
+    /* ======================
+       C) SOCKET TAG HANDLER
+       ====================== */
+    socket.on('findBoxTag', function(tag) {
+      if (!scanningActive) return;
+      const searchText = document.getElementById('findBoxInput').value.trim().toLowerCase();
+      if (!((tag.epcAscii || "").toLowerCase().includes(searchText))) return;
+
+      const existing = findBoxTags.find(t => t.epcHex === tag.epcHex);
+      if (existing) {
+        existing.seenCount = tag.seenCount;
+        existing.rssi = tag.rssi;
+      } else {
+        findBoxTags.push(tag);
+      }
+      lastTagTimestamp = Date.now();
+
+      // Track min/max (raw)
+      if (currentMaxRSSI === -100 || tag.rssi > currentMaxRSSI) currentMaxRSSI = tag.rssi;
+      if (currentMinRSSI === -100 || tag.rssi < currentMinRSSI) currentMinRSSI = tag.rssi;
+
+      // Best raw
+      const bestTag = findBoxTags.reduce((prev, curr) => (prev.rssi > curr.rssi ? prev : curr));
+      bestRSSI = bestTag.rssi;
+
+      // EMA (smooth)
+      emaRSSI = (emaRSSI === -100) ? tag.rssi : (EMA_ALPHA * tag.rssi + (1 - EMA_ALPHA) * emaRSSI);
+    });
+
+    /* ======================
+       BAR / INDICATOR
+       ====================== */
+    function updateSignalBarMarkers(rssiForBar = bestRSSI) {
+      const bar = document.getElementById('signalBarContainer');
+      const barWidth = bar.clientWidth;
+
+      const currPercent = convertRSSIToPercentage(rssiForBar);
+      const maxPercent  = convertRSSIToPercentage(currentMaxRSSI);
+      const minPercent  = convertRSSIToPercentage(currentMinRSSI);
+
+      document.getElementById('currentMarker').style.left = (currPercent * barWidth / 100) + 'px';
+      document.getElementById('maxMarker').style.left     = (maxPercent * barWidth / 100) + 'px';
+      document.getElementById('minMarker').style.left     = (minPercent * barWidth / 100) + 'px';
+
+      // Color current marker by strength
+      const cur = document.getElementById('currentMarker');
+      if (rssiForBar >= -60)      cur.style.backgroundColor = '#008000';   // strong
+      else if (rssiForBar >= -70) cur.style.backgroundColor = '#7fbf00';   // good
+      else if (rssiForBar >= -80) cur.style.backgroundColor = '#ffb000';   // fair
+      else                        cur.style.backgroundColor = '#e74c3c';   // weak
+
+      document.getElementById('currentValueText').innerText = "Current (EMA): " + rssiForBar.toFixed(1) + " dBm";
+      document.getElementById('maxValueText').innerText     = "Max: " + currentMaxRSSI.toFixed(1) + " dBm";
+      document.getElementById('minValueText').innerText     = "Min: " + currentMinRSSI.toFixed(1) + " dBm";
+    }
+
+    // (Unused modal helpers retained)
+    function openFindBoxModal() { document.getElementById('findBoxModal')?.style && (document.getElementById('findBoxModal').style.display = "flex"); }
+    function closeFindBoxModal() { document.getElementById('findBoxModal')?.style && (document.getElementById('findBoxModal').style.display = "none"); }
+    function findBox() {
+      const searchText = document.getElementById('findBoxInput').value.trim().toLowerCase();
+      if (!searchText) { alert("Please enter an ASCII tag value."); return; }
+      const matches = allTags?.filter?.(t => (t.epcAscii || "").toLowerCase().includes(searchText)) || [];
+      if (matches.length === 0) { updateSignalIndicator?.(-100); }
+      else {
+        const bestMatch = matches.reduce((prev, curr) => (prev.rssi > curr.rssi ? prev : curr));
+        updateSignalIndicator?.(bestMatch.rssi);
+      }
+    }
+    function scaleForRSSI(rssi) { rssi = Math.max(-90, Math.min(rssi, -50)); return (-rssi * 0.025 + 3.25); }
+    function updateSignalIndicator(rssi) {
+      const indicator = document.getElementById('signalIndicator');
+      if(!indicator) return;
+      if(rssi === 0) { indicator.style.transform = "scale(1)"; indicator.style.backgroundColor = "rgba(37,64,143,0.5)"; }
+      else {
+        const scaleVal = scaleForRSSI(rssi);
+        indicator.style.transform = "scale(" + scaleVal + ")";
+        let intensity = Math.round(50 + ((-rssi - 50) / 40) * 205);
+        indicator.style.backgroundColor = "rgba(37,64,143," + (intensity/255).toFixed(2) + ")";
+      }
+    }
+  </script>
+
+  <script>
+  // Run only on Find a Box page and only after DOM is ready
+  document.addEventListener('DOMContentLoaded', () => {
+    const onFindBoxPage = !!document.getElementById('rssiChart');
+    if (!onFindBoxPage) return;
+
+    // Wire buttons
+    const startBtn = document.getElementById('startSearchBtn');
+    const stopBtn  = document.getElementById('stopSearchBtn');
+    if (startBtn) startBtn.addEventListener('click', startSearch);
+    if (stopBtn)  stopBtn.addEventListener('click', stopSearch);
+
+    // Enter key: start when idle, stop when running
+    document.getElementById('findBoxInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        if (!scanningActive) startSearch();
+        else stopSearch();
+      }
+    });
+
+    // Prefill & auto-start from URL (?tag=XYZ)
+    const params = new URLSearchParams(window.location.search);
+    const prefill = params.get('tag');
+    if (prefill) {
+      const input = document.getElementById('findBoxInput');
+      input.value = prefill;
+    }
+
+    // Wait for Chart.js (handles CDN fail + local fallback)
+    const waitForChart = setInterval(() => {
+      if (window.Chart) {
+        clearInterval(waitForChart);
+        initRSSIChart();
+        if (prefill) setTimeout(() => startSearch(), 100); // auto-start after chart ready
+      }
+    }, 50);
+    setTimeout(() => clearInterval(waitForChart), 5000); // safety stop
+  });
+
+  /* ======================
+     B) INIT CHART (raw + EMA)
+     ====================== */
+  function initRSSIChart() {
+    if (!window.Chart) { console.warn('Chart.js not loaded; skipping chart init'); return; }
+    const canvas = document.getElementById('rssiChart');
+    if (!canvas) return;
+
+    // Seed 60s buffer at -100 dBm
+    timeLabels = [];
+    rssiData = [];
+    rssiDataEma = [];
+    const now = new Date();
+    for (let i = 59; i >= 0; i--) {
+      const past = new Date(now.getTime() - i * 1000);
+      timeLabels.push(past.toLocaleTimeString());
+      rssiData.push(-100);
+      rssiDataEma.push(-100);
+    }
+    emaRSSI = -100;
+
+    const ctx = canvas.getContext('2d');
+    rssiChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: timeLabels,
+        datasets: [
+          {
+            label: 'RSSI (raw, dBm)',
+            data: rssiData,
+            fill: false,
+            borderColor: 'rgba(37,64,143,0.35)',
+            borderWidth: 2,
+            tension: 0.15
+          },
+          {
+            label: 'RSSI (EMA, dBm)',
+            data: rssiDataEma,
+            fill: false,
+            borderColor: 'rgba(37,64,143,1)',
+            borderWidth: 3,
+            tension: 0.15
+          }
+        ]
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        maintainAspectRatio: true,
+        scales: {
+          y: {
+            min: RSSI_CLAMP_MIN, max: 0, ticks: { stepSize: 10 },
+            grid: { color: ctx => {
+              const v = ctx.tick.value;
+              return (v === -80 || v === -70 || v === -60) ? 'rgba(37,64,143,0.25)' : 'rgba(0,0,0,0.08)';
+            }}
+          },
+          x: { ticks: { maxTicksLimit: 8 } }
+        },
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { font: { size: 14 } }
+          },
+          tooltip: { mode: 'index', intersect: false }
+        }
+      }
+    });
+  }
+
+  // rssiChart?.update('none');  // (we already use 'none' in the loop)
+  </script>
+</body>
+</html>
