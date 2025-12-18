@@ -35,6 +35,35 @@ public class SharePointExcelService
     }
 
     /// <summary>
+    /// Returns a snapshot of all cached rows for diagnostics/UI preview.
+    /// </summary>
+    public static async Task<JArray> GetAllEntriesAsync()
+    {
+        if (DateTime.UtcNow >= cacheExpiration || cachedRows == null)
+        {
+            await LoadCacheAsync();
+        }
+
+        var rows = new JArray();
+        foreach (var kvp in cachedLookup)
+        {
+            var entry = new JObject
+            {
+                { "RfidBox", kvp.Key }
+            };
+
+            foreach (var property in kvp.Value)
+            {
+                entry[property.Key] = property.Value;
+            }
+
+            rows.Add(entry);
+        }
+
+        return rows;
+    }
+
+    /// <summary>
     /// Loads the Excel table from the local DB.xlsx file and builds a lookup dictionary.
     /// </summary>
     private static Task LoadCacheAsync()

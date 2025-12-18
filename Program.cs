@@ -153,4 +153,11 @@ app.MapPost("/api/refreshData", (HttpContext httpContext) =>
     return Results.Ok("Data refreshed at " + DateTime.UtcNow);
 });
 
+// API: Preview the cached DB.xlsx data for diagnostics/UI verification.
+app.MapGet("/api/db/preview", async () =>
+{
+    var entries = await SharePointExcelService.GetAllEntriesAsync();
+    return Results.Ok(entries);
+});
+
 app.Run();
