@@ -8,7 +8,10 @@ using System.Text.Json;
 var builder = WebApplication.CreateBuilder(args);
 
 // Let the server listen on specific IP addresses and hostnames.
-builder.WebHost.UseUrls("http://192.168.48.153:5026", "http://PRI-R-A03:5026");
+builder.WebHost.UseUrls(
+    "http://192.168.48.153:5026",
+    "http://PRI-R-A03:5026",
+    "http://localhost:5026");
 
 // Ensure exact JSON names for APIs.
 builder.Services.Configure<JsonOptions>(options =>
@@ -21,7 +24,9 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowSharePoint",
         policy => policy
-            .WithOrigins("https://plasticrecycling.sharepoint.com") // Replace with your actual SharePoint domain.
+            .WithOrigins(
+                "https://plasticrecycling.sharepoint.com",
+                "http://localhost:3000")
             .AllowAnyHeader()
             .AllowAnyMethod());
 });
@@ -34,9 +39,6 @@ builder.Services.AddSingleton<RFIDService>(provider =>
     new RFIDService(provider.GetRequiredService<IHubContext<RFIDHub>>()));
 
 var app = builder.Build();
-
-const path = require('path');
-app.use('/libs', express.static(path.join(__dirname, 'libs')));
 
 // Use CORS.
 app.UseCors("AllowSharePoint");
