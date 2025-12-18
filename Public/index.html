@@ -68,7 +68,7 @@
     .top-bar {
       position: fixed;
       top: 0;
-      left: 200px; /* Adjust according to nav width */
+      left: 200px;
       width: calc(100% - 200px);
       height: 110px;
       background: rgba(146,208,80,0.95);
@@ -93,10 +93,10 @@
     }
     /* Main Content */
     .content {
-      margin: 120px 120px 20px 220px; /* left margin adjusted for nav */
+      margin: 120px 120px 20px 220px;
       padding: 20px;
     }
-    /* Controls (Buttons & Status) */
+    /* Controls */
     .controls, .statsBox, .search-controls {
       background: rgba(255,255,255,0.9);
       border: 1px solid rgba(200,200,200,0.7);
@@ -109,7 +109,6 @@
       gap: 10px;
       margin-bottom: 10px;
     }
-    /* Main Controls Container */
     #mainControls {
       display: flex;
       justify-content: space-between;
@@ -148,7 +147,7 @@
       font-size: 26px;
       font-weight: bold;
     }
-    /* Enlarged Reader Connection Status */
+    /* Reader Connection Status */
     #connectionStatus {
       display: flex;
       gap: 20px;
@@ -174,7 +173,7 @@
       font-size: 16px;
       padding: 8px 16px;
     }
-    /* Modern Table Styling */
+    /* Table */
     table {
       border-collapse: collapse;
       width: 100%;
@@ -196,16 +195,13 @@
       cursor: pointer;
       user-select: none;
       position: sticky;
-      top: 110px; /* below top bar */
+      top: 110px;
       z-index: 2;
     }
-    table tr:nth-child(even) {
-      background-color: #f9f9f9;
-    }
-    table tr:hover {
-      background-color: #e9e9e9;
-    }
-    /* Pagination Controls */
+    table tr:nth-child(even) { background-color: #f9f9f9; }
+    table tr:hover { background-color: #e9e9e9; }
+
+    /* Pagination */
     #paginationControls {
       margin-top: 10px;
       display: flex;
@@ -218,7 +214,8 @@
       padding: 6px 12px;
       font-size: 16px;
     }
-    /* Stats Section Layout */
+
+    /* Stats Layout */
     #statsContainer {
       display: flex;
       gap: 20px;
@@ -226,7 +223,6 @@
       margin-bottom: 20px;
       align-items: stretch;
     }
-    /* Left Stats: stacked */
     #leftStats {
       display: flex;
       flex-direction: column;
@@ -255,9 +251,9 @@
     .statsBox table td {
       padding: 5px 10px;
       border-bottom: none;
+      font-size: 16px;
     }
 
-    /* Right Stats: Charts column */
     #chartsColumn {
       flex: 1;
       min-width: 320px;
@@ -273,15 +269,21 @@
       padding: 10px;
       text-align: center;
     }
-    .chartBox h3 {
-      margin: 0 0 10px 0;
-    }
+    .chartBox h3 { margin: 0 0 10px 0; }
     .chartCanvas {
       width: 360px !important;
       height: 360px !important;
     }
 
-    /* Modal for inline Record Options */
+    #tagsTable tbody tr { cursor: pointer; }
+    .tableWrap { overflow-x: auto; }
+    .truncate {
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Popups/Modals */
     #recordOptionsPopup {
       position: fixed;
       top: 50%;
@@ -308,7 +310,6 @@
       cursor: pointer;
       font-size: 20px;
     }
-    /* Modal for "Find a Box" */
     #findBoxModal {
       position: fixed;
       top: 0;
@@ -351,22 +352,9 @@
       cursor: pointer;
       font-size: 24px;
     }
-    .total-row td {
-      font-weight: 700;
-      border-top: 2px solid #ddd;
-    }
-    #tagsTable tbody tr { cursor: pointer; }
-
-    .tableWrap { overflow-x: auto; }
-    .truncate {
-      max-width: 220px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
   </style>
 </head>
 <body>
-  <!-- Left Navigation Pane -->
   <div class="left-nav">
     <div class="nav-header">
       <img src="Media/companylogo.png" alt="Company Logo">
@@ -380,15 +368,12 @@
     </ul>
   </div>
 
-  <!-- Top Bar -->
   <div class="top-bar">
     <h1>Inventory Scanning&nbsp; &nbsp; &nbsp;&nbsp;</h1>
     <img src="Media/grouplogo.png" alt="Group Logo">
   </div>
 
-  <!-- Main Content -->
   <div class="content">
-    <!-- Main Controls -->
     <div class="controls" id="mainControls">
       <div id="leftControls">
         <button id="startBtn">Start</button>
@@ -410,10 +395,8 @@
       </div>
     </div>
 
-    <!-- Temporary status messages -->
     <div class="status-bar" id="statusMessage"></div>
 
-    <!-- Stats Section -->
     <div id="statsContainer">
       <div id="leftStats">
         <div class="statsBox" id="lotTypeStats">
@@ -424,7 +407,7 @@
             <tr><td>BL:</td><td id="blCount">0 (0%)</td></tr>
             <tr><td>GL:</td><td id="glCount">0 (0%)</td></tr>
             <tr><td>Other:</td><td id="otherCount">0 (0%)</td></tr>
-            <tr class="total-row"><td>Total:</td><td id="lotTypeTotal">0</td></tr>
+            <tr><td><b>Total:</b></td><td id="lotTypeTotal"><b>0</b></td></tr>
           </table>
         </div>
 
@@ -435,15 +418,35 @@
             <tr><td>12 chars:</td><td id="len12Count">0 (0%)</td></tr>
             <tr><td>16 chars:</td><td id="len16Count">0 (0%)</td></tr>
             <tr><td>Other Length:</td><td id="lenOtherCount">0 (0%)</td></tr>
-            <tr class="total-row"><td>Total:</td><td id="lenTotal">0</td></tr>
+            <tr><td><b>Total:</b></td><td id="lenTotal"><b>0</b></td></tr>
           </table>
         </div>
 
         <div class="statsBox" id="totalsBox">
-          <h3>Totals (DB-Joined)</h3>
+          <h3>Totals</h3>
           <table>
             <tr><td>Total Pounds:</td><td id="totalPounds">0</td></tr>
             <tr><td>Total Value (Pounds × Price):</td><td id="totalValue">$0.00</td></tr>
+            <tr><td>DB Match Rate:</td><td id="dbMatchRate">0 / 0 (0%)</td></tr>
+          </table>
+        </div>
+
+        <div class="statsBox" id="completenessBox">
+          <h3>Data Completeness</h3>
+          <table>
+            <tr><td>Records with Pounds:</td><td id="hasPounds">0</td></tr>
+            <tr><td>Records missing Pounds:</td><td id="noPounds">0</td></tr>
+            <tr><td>Records with Price:</td><td id="hasPrice">0</td></tr>
+            <tr><td>Records missing Price:</td><td id="noPrice">0</td></tr>
+          </table>
+        </div>
+
+        <div class="statsBox" id="timeWindowBox">
+          <h3>Time Window</h3>
+          <table>
+            <tr><td>Tags seen (last 60s):</td><td id="tagsLast60">0</td></tr>
+            <tr><td>New tags / minute:</td><td id="newPerMin">0</td></tr>
+            <tr><td>Time since last new tag:</td><td id="sinceLastNew">—</td></tr>
           </table>
         </div>
       </div>
@@ -466,7 +469,6 @@
       </div>
     </div>
 
-    <!-- Search Controls -->
     <div class="controls search-controls">
       <label for="searchInput">Search ASCII:</label>
       <input id="searchInput" type="text" placeholder="e.g. PL002314" />
@@ -474,7 +476,6 @@
       <button id="clearSearchBtn">Clear Search</button>
     </div>
 
-    <!-- Tag List Table -->
     <h2>Tag List (Filtered): <span id="count">0</span></h2>
 
     <div class="tableWrap">
@@ -487,7 +488,6 @@
             <th onclick="sortTags('epcAscii')">ASCII</th>
             <th>RSSI</th>
             <th>SeenCount</th>
-
             <th>LOT</th>
             <th>DEPT</th>
             <th>ROW</th>
@@ -510,7 +510,6 @@
     <div id="paginationControls"></div>
   </div>
 
-  <!-- Inline Record Options Popup -->
   <div id="recordOptionsPopup">
     <span class="closePopup" id="closePopup">&times;</span>
     <p id="popupMessage">Options for record: <span id="popupRecord"></span></p>
@@ -520,7 +519,6 @@
     <div id="sharepointData" style="margin-top:10px; display:none;"></div>
   </div>
 
-  <!-- Modal for "Find a Box" -->
   <div id="findBoxModal">
     <div id="findBoxModalContent">
       <span class="closeModal" id="closeFindBox">&times;</span>
@@ -533,7 +531,6 @@
     </div>
   </div>
 
-  <!-- Socket.IO client -->
   <script src="/socket.io/socket.io.js"></script>
 
   <script>
@@ -543,6 +540,7 @@
     let elapsedTime = 0;
     let isScanning = false;
     let currentSort = 'firstSeen';
+
     let lotChart = null;
     let typeChart = null;
     let colorChart = null;
@@ -554,7 +552,10 @@
     let lastFiltered = [];
     let lotTypeFilter = null;
 
-    // Stats throttle (prevents chart redraw storms)
+    // Time-window tracking
+    let lastNewTagAt = 0; // ms epoch; only updates when we see a NEW tag (not just seenCount updates)
+
+    // Stats throttle
     let lastStatsAt = 0;
     const STATS_MIN_INTERVAL_MS = 500;
 
@@ -586,18 +587,20 @@
         tag._ascii = (tag.epcAscii || "").toLowerCase();
         tag._ts = Date.parse(tag.firstSeen || 0) || 0;
         allTags.push(tag);
+        lastNewTagAt = Date.now();
       }
       scheduleRerender();
     });
 
     socket.on('clearData', function() {
       allTags = [];
+      lastNewTagAt = 0;
       renderTags([]);
       resetTimerDisplay();
       updateStats(true);
     });
 
-    document.addEventListener('DOMContentLoaded', () => { init(); });
+    document.addEventListener('DOMContentLoaded', () => init());
 
     function init() {
       restoreStateFromUrl();
@@ -664,6 +667,9 @@
         catch { showTemporaryMessage("Copy failed", "red"); }
       });
 
+      // Keep "time since last new tag" ticking even when no tags arrive
+      setInterval(() => updateTimeWindowOnly(), 1000);
+
       window.addEventListener("beforeunload", function (e) {
         if (isScanning) {
           e.preventDefault();
@@ -676,7 +682,6 @@
 
     async function loadDbMap() {
       try {
-        // FULL DB for scanning/join:
         const resp = await fetch('/api/db/all', { cache: 'no-store' });
         if (!resp.ok) throw new Error("DB HTTP " + resp.status);
         const data = await resp.json();
@@ -758,10 +763,13 @@
       if (v === null || v === undefined) return 0;
       const s = String(v).trim();
       if (!s) return 0;
-      // remove $ , and spaces
       const cleaned = s.replace(/[$, ]+/g, '').replace(/[^\d.\-]/g, '');
       const n = parseFloat(cleaned);
       return Number.isFinite(n) ? n : 0;
+    }
+
+    function hasNonBlank(v) {
+      return String(v ?? "").trim().length > 0;
     }
 
     function startScan() {
@@ -800,12 +808,14 @@
       fetch('/api/clear').then(safeJson).then(data => {
         showTemporaryMessage(data.message || "Cleared", "blue");
         allTags = [];
+        lastNewTagAt = 0;
         renderTags([]);
         resetTimerDisplay();
         updateStats(true);
       }).catch(() => showTemporaryMessage("Failed to clear data", "red"));
     }
     function exportData() {
+      // Joined XLSX export endpoint (server-side join)
       window.location = '/api/exportJoined';
     }
 
@@ -830,7 +840,6 @@
           (t.epcAscii || "").replace(/"/g,'""'),
           (t.rssi ?? "").toString(),
           (t.seenCount ?? "").toString(),
-
           (db.lot || "").toString(),
           (db.dept || "").toString(),
           (db.row || "").toString(),
@@ -954,7 +963,6 @@
           <td>${escapeHtml(t.epcAscii || "")}</td>
           <td>${escapeHtml(t.rssi ?? "")}</td>
           <td>${escapeHtml(t.seenCount ?? "")}</td>
-
           <td class="truncate" title="${escapeHtml(db.lot || "")}">${escapeHtml(db.lot || "")}</td>
           <td class="truncate" title="${escapeHtml(db.dept || "")}">${escapeHtml(db.dept || "")}</td>
           <td class="truncate" title="${escapeHtml(db.row || "")}">${escapeHtml(db.row || "")}</td>
@@ -1032,17 +1040,26 @@
       if (!force && (now - lastStatsAt) < STATS_MIN_INTERVAL_MS) return;
       lastStatsAt = now;
 
-      // Lot types + lengths based on scanned ASCII
       let pl = 0, ff = 0, bl = 0, gl = 0, other = 0;
       let len8 = 0, len12 = 0, len16 = 0, lenOther = 0;
 
-      // Type + Color distributions based on DB-joined data
       const typeCounts = new Map();
       const colorCounts = new Map();
 
-      // Totals based on DB-joined pounds/price
       let totalPounds = 0;
       let totalValue = 0;
+
+      let dbMatched = 0;
+      let dbUnmatched = 0;
+
+      let hasPounds = 0;
+      let noPounds  = 0;
+      let hasPrice  = 0;
+      let noPrice   = 0;
+
+      const nowMs = Date.now();
+      const since60 = nowMs - 60000;
+      let tagsLast60 = 0;
 
       for (const tag of allTags) {
         const ascii = tag.epcAscii || "";
@@ -1059,14 +1076,24 @@
         else if(len === 16) len16++;
         else lenOther++;
 
+        if ((tag._ts || 0) >= since60) tagsLast60++;
+
         const asciiKey = ascii.toString().trim().toUpperCase();
         const db = dbMap.get(asciiKey);
 
+        if (db) dbMatched++; else dbUnmatched++;
+
         const t = (db && db.type ? String(db.type).trim() : "") || "Unknown";
         const c = (db && db.color ? String(db.color).trim() : "") || "Unknown";
-
         typeCounts.set(t, (typeCounts.get(t) || 0) + 1);
         colorCounts.set(c, (colorCounts.get(c) || 0) + 1);
+
+        // Completeness: treat DB-missing as missing
+        const poundsPresent = db && hasNonBlank(db.pounds);
+        const pricePresent  = db && hasNonBlank(db.price);
+
+        if (poundsPresent) hasPounds++; else noPounds++;
+        if (pricePresent)  hasPrice++;  else noPrice++;
 
         if (db) {
           const pds = parseNumberLoose(db.pounds);
@@ -1096,20 +1123,47 @@
       document.getElementById('totalPounds').innerText = totalPounds.toLocaleString(undefined, { maximumFractionDigits: 2 });
       document.getElementById('totalValue').innerText  = totalValue.toLocaleString(undefined, { style: "currency", currency: "USD" });
 
+      const totalScan = dbMatched + dbUnmatched;
+      const matchPct = totalScan ? ((dbMatched / totalScan) * 100).toFixed(1) : "0.0";
+      document.getElementById('dbMatchRate').innerText = `${dbMatched} / ${totalScan} (${matchPct}%)`;
+
+      document.getElementById('hasPounds').innerText = hasPounds.toLocaleString();
+      document.getElementById('noPounds').innerText  = noPounds.toLocaleString();
+      document.getElementById('hasPrice').innerText  = hasPrice.toLocaleString();
+      document.getElementById('noPrice').innerText   = noPrice.toLocaleString();
+
+      document.getElementById('tagsLast60').innerText = tagsLast60.toLocaleString();
+      document.getElementById('newPerMin').innerText  = tagsLast60.toLocaleString();
+      // sinceLastNew is updated in updateTimeWindowOnly()
+
       updateLotTypeChart([pl, ff, bl, gl, other]);
 
       const typeTop = topNWithUnknownFirst(typeCounts, 10);
-      updateGenericPieChart("typeChart", "Type", typeTop.labels, typeTop.values, (c) => typeChart = c, () => typeChart);
+      updateGenericPieChart("typeChart", typeTop.labels, typeTop.values, (c) => typeChart = c, () => typeChart);
 
       const colorTop = topNWithUnknownFirst(colorCounts, 10);
-      updateGenericPieChart("colorChart", "Color", colorTop.labels, colorTop.values, (c) => colorChart = c, () => colorChart);
+      updateGenericPieChart("colorChart", colorTop.labels, colorTop.values, (c) => colorChart = c, () => colorChart);
+
+      updateTimeWindowOnly();
+    }
+
+    function updateTimeWindowOnly() {
+      const el = document.getElementById('sinceLastNew');
+      if (!el) return;
+      if (!lastNewTagAt) {
+        el.innerText = "—";
+        return;
+      }
+      const diffSec = Math.floor((Date.now() - lastNewTagAt) / 1000);
+      if (diffSec < 60) el.innerText = `${diffSec}s`;
+      else if (diffSec < 3600) el.innerText = `${Math.floor(diffSec/60)}m ${diffSec%60}s`;
+      else el.innerText = `${Math.floor(diffSec/3600)}h ${Math.floor((diffSec%3600)/60)}m`;
     }
 
     function topNWithUnknownFirst(countMap, n) {
       const entries = Array.from(countMap.entries());
       entries.sort((a, b) => b[1] - a[1]);
 
-      // pull Unknown to front if present
       const unknownIdx = entries.findIndex(e => String(e[0]).toLowerCase() === "unknown");
       if (unknownIdx > 0) {
         const u = entries.splice(unknownIdx, 1)[0];
@@ -1139,9 +1193,6 @@
 
       if (lotChart) {
         lotChart.data.datasets[0].data = dataArray;
-        if (lotChart.options.plugins && lotChart.options.plugins.subtitle) {
-          lotChart.options.plugins.subtitle.text = 'Total: ' + total;
-        }
         lotChart.update();
         return;
       }
@@ -1150,33 +1201,14 @@
         type: 'pie',
         data: {
           labels: ['PL', 'FF', 'BL', 'GL', 'Other'],
-          datasets: [{
-            data: dataArray,
-            backgroundColor: [
-              'rgba(75, 192, 192, 0.7)',
-              'rgba(255, 205, 86, 0.7)',
-              'rgba(255, 99, 132, 0.7)',
-              'rgba(54, 162, 235, 0.7)',
-              'rgba(201, 203, 207, 0.7)'
-            ]
-          }]
+          datasets: [{ data: dataArray }]
         },
         options: {
           responsive: false,
           maintainAspectRatio: false,
           animation: { duration: 200 },
           plugins: {
-            subtitle: {
-              display: true,
-              text: 'Total: ' + total,
-              padding: { top: 6, bottom: 2 }
-            },
-            legend: {
-              position: 'bottom',
-              labels: {
-                font: { size: 14 }
-              }
-            }
+            legend: { position: 'bottom', labels: { font: { size: 14 } } }
           },
           onClick: (evt) => {
             const points = lotChart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
@@ -1192,7 +1224,7 @@
       });
     }
 
-    function updateGenericPieChart(canvasId, title, labels, values, setChart, getChart) {
+    function updateGenericPieChart(canvasId, labels, values, setChart, getChart) {
       const canvas = document.getElementById(canvasId);
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
@@ -1209,20 +1241,13 @@
         type: 'pie',
         data: {
           labels: labels,
-          datasets: [{
-            data: values
-          }]
+          datasets: [{ data: values }]
         },
         options: {
           responsive: false,
           maintainAspectRatio: false,
           animation: { duration: 200 },
-          plugins: {
-            legend: {
-              position: 'bottom',
-              labels: { font: { size: 14 } }
-            }
-          }
+          plugins: { legend: { position: 'bottom', labels: { font: { size: 14 } } } }
         }
       });
 
@@ -1280,8 +1305,7 @@
       params.set('sort', currentSort);
       params.set('page', String(currentPage));
       if (lotTypeFilter) params.set('ltype', lotTypeFilter); else params.delete('ltype');
-      const newUrl = `${window.location.pathname}?${params.toString()}`;
-      history.replaceState(null, '', newUrl);
+      history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
     }
 
     function restoreStateFromUrl() {
@@ -1296,7 +1320,14 @@
       currentPage = Number.isFinite(page) && page > 0 ? page : 1;
       lotTypeFilter = (ltype === 'PL' || ltype === 'FF' || ltype === 'BL' || ltype === 'GL' || ltype === 'Other') ? ltype : null;
     }
+
+    function showTemporaryMessage(msg, color="blue") {
+      const el = document.getElementById('statusMessage');
+      el.innerText = msg;
+      el.style.color = color;
+      el.style.visibility = "visible";
+      setTimeout(() => { el.style.visibility = "hidden"; }, 3000);
+    }
   </script>
 </body>
 </html>
-
