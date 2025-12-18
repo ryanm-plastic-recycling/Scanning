@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Data Scanning</title>
+  <!-- Load Chart.js (if needed for consistency) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    /* Base and Background */
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(rgba(255,255,255,0.85), rgba(255,255,255,0.85)),
+                  url('Media/RockvilleFront.jpg') no-repeat center center fixed;
+      background-size: 75% auto;
+      background-position: right;
+      background-attachment: fixed;
+      color: #333;
+    }
+    /* Left Navigation Pane */
+    .left-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 200px;
+      height: 100%;
+      background: rgba(146,208,80,0.95);
+      box-shadow: 2px 0 4px rgba(0,0,0,0.1);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 20px;
+    }
+    .nav-header {
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .nav-header img {
+      max-width: 80%;
+      height: auto;
+    }
+    .left-nav ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      width: 100%;
+    }
+    .left-nav li {
+      margin: 10px 0;
+      text-align: center;
+    }
+    .left-nav li a {
+      color: #fff;
+      text-decoration: none;
+      font-size: 18px;
+      display: block;
+      padding: 10px 0;
+      transition: background 0.3s;
+    }
+    .left-nav li a:hover {
+      background: rgba(37,64,143,1);
+    }
+    /* Top Bar */
+    .top-bar {
+      position: fixed;
+      top: 0;
+      left: 200px;
+      width: calc(100% - 200px);
+      height: 110px;
+      background: rgba(146,208,80,0.95);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      z-index: 1000;
+      border-radius: 0;
+    }
+    .top-bar h1 {
+      color: rgba(37,64,143,1);
+      font-size: 36px;
+      margin: 0 auto;
+      text-align: center;
+      flex-grow: 1;
+    }
+    .top-bar img {
+      max-height: 80px;
+      width: auto;
+    }
+    /* Main Content */
+    .content {
+      margin: 120px 120px 20px 220px;
+      padding: 20px;
+    }
+    /* Controls, Stats, and Search */
+    .controls, .statsBox, .search-controls {
+      background: rgba(255,255,255,0.9);
+      border: 1px solid rgba(200,200,200,0.7);
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      padding: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    #mainControls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    #leftControls, #rightControls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    #statusContainer {
+      text-align: center;
+      flex-grow: 1;
+    }
+    .controls button {
+      font-size: 20px;
+      padding: 12px 24px;
+      border: none;
+      background-color: rgba(37,64,143,1);
+      color: #fff;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: transform 0.3s ease, background-color 0.3s ease;
+    }
+    .controls button:hover {
+      background-color: rgba(37,64,143,0.9);
+      transform: translateY(-2px);
+    }
+    .status-bar {
+      font-size: 26px;
+      font-weight: bold;
+      min-height: 30px;
+    }
+    #timer {
+      font-size: 26px;
+      font-weight: bold;
+    }
+    /* Table Styling */
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 20px;
+      background: #fff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    table th, table td {
+      padding: 12px 15px;
+      font-size: 18px;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+    }
+    table th {
+      background-color: #f2f2f2;
+      border-bottom: 2px solid #ddd;
+      cursor: pointer;
+      user-select: none;
+    }
+    table tr:nth-child(even) {
+      background-color: #f9f9f9;
+    }
+    table tr:hover {
+      background-color: #e9e9e9;
+    }
+    /* Modal for "Find a Box" */
+    #findBoxModal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+    }
+    #findBoxModalContent {
+      background: #fff;
+      padding: 30px;
+      border-radius: 8px;
+      text-align: center;
+      width: 400px;
+      position: relative;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.3);
+    }
+    #findBoxModalContent input {
+      font-size: 18px;
+      padding: 10px;
+      width: 80%;
+      margin-bottom: 15px;
+    }
+    #signalIndicator {
+      width: 70px;
+      height: 70px;
+      background-color: rgba(37,64,143,0.5);
+      border-radius: 50%;
+      margin: 20px auto;
+      transition: transform 0.5s, background-color 0.5s;
+    }
+    .closeModal {
+      position: absolute;
+      top: 10px;
+      right: 15px;
+      cursor: pointer;
+      font-size: 24px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Left Navigation Pane -->
+  <div class="left-nav">
+    <div class="nav-header">
+      <img src="Media/companylogo.png" alt="Company Logo">
+    </div>
+    <ul>
+      <li><a href="index.html">Scanning</a></li>
+      <li><a href="findBox.html">Find a Box</a></li>
+      <li><a href="sharepoint.html">Scan Data</a></li>
+      <li><a href="liveScan.html">Live Data Scan</a></li>
+    </ul>
+  </div>
+
+  <!-- Top Bar -->
+  <div class="top-bar">
+    <h1>Live Data Scanning</h1>
+    <img src="Media/grouplogo.png" alt="Group Logo">
+  </div>
+
+  <!-- Main Content -->
+  <div class="content">
+    <!-- Main Controls -->
+    <div class="controls" id="mainControls">
+      <div id="leftControls">
+        <button id="startBtn">Start</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="stopBtn">Stop</button>
+      </div>
+      <div id="statusContainer">
+        <span id="timer">00:00:00</span><br>
+        <span id="scanningStatus">🔴 Not Scanning</span>
+      </div>
+      <div id="rightControls">
+        <button id="clearBtn">Clear Data</button>
+        <button id="exportBtn">Export XLSX</button>
+      </div>
+    </div>
+
+    <!-- Search Controls -->
+    <div class="controls search-controls">
+      <label for="searchInput">Search ASCII:</label>
+      <input id="searchInput" type="text" placeholder="e.g. PL002314" />
+      <button id="searchBtn">Search</button>
+      <button id="clearSearchBtn">Clear Search</button>
+      <button id="findBoxBtn">Find a Box</button>
+    </div>
+
+    <!-- Temporary Status Messages -->
+    <div class="status-bar" id="statusMessage"></div>
+
+    <!-- Live Tag List Table with Extra Columns -->
+    <h2>Live Tag List (Filtered): <span id="count">0</span></h2>
+    <table id="scanDataTable">
+      <thead>
+        <tr>
+          <th>First Seen</th>
+          <th>TID (Hex)</th>
+          <th>EPC (Hex)</th>
+          <th>ASCII</th>
+          <th>RSSI</th>
+          <th>SeenCount</th>
+          <th>LOT</th>
+          <th>DEPT</th>
+          <th>ROW</th>
+          <th>DEPT LOT</th>
+          <th>SUPPLIER</th>
+          <th>TYPE</th>
+          <th>COLOR</th>
+          <th>FORMAT</th>
+          <th>POUNDS</th>
+          <th>PRICE</th>
+          <th>FREIGHT</th>
+          <th>TOLL</th>
+          <th>DATE</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Live rows will be prepended here -->
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Modal for "Find a Box" -->
+  <div id="findBoxModal">
+    <div id="findBoxModalContent">
+      <span class="closeModal" id="closeFindBox">&times;</span>
+      <h3>Find a Box</h3>
+      <input type="text" id="findBoxInput" placeholder="Enter ASCII text" />
+      <br>
+      <button id="searchBoxBtn">Search Box</button>
+      <div id="signalIndicator"></div>
+    </div>
+  </div>
+
+  <!-- Include Socket.IO and SignalR libraries -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js"></script>
+  <script>
+    let allTags = []; // Master list of tags
+    let timerInterval = null;
+    let startTime = null;
+    let isScanning = false;
+    let currentSort = 'firstSeen'; // Default sort order
+    let lotChart = null; // (If needed for stats later)
+
+    // Establish SignalR connection to RFID hub
+    const connection = new signalR.HubConnectionBuilder()
+      .withUrl("/rfidHub")
+      .build();
+
+    connection.start().then(() => {
+      console.log("Connected to SignalR hub for live scanning.");
+      // Optionally update status message here
+    }).catch(err => {
+      console.error("SignalR connection error:", err);
+    });
+
+    // Listen for live tag updates
+    connection.on("ReceiveTag", function(tag) {
+      // Optionally merge into allTags or simply prepend to table:
+      prependTagToTable(tag);
+      // You may also update stats if desired.
+    });
+
+    // Prepend a new tag row to the table
+    function prependTagToTable(tag) {
+      const tbody = document.getElementById("scanDataTable").querySelector("tbody");
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${new Date().toLocaleString()}</td>
+        <td>${tag.tidHex || ""}</td>
+        <td>${tag.epcHex || ""}</td>
+        <td>${tag.epcAscii || ""}</td>
+        <td>${tag.rssi || ""}</td>
+        <td>${tag.seenCount || ""}</td>
+        <td>${tag.lot || ""}</td>
+        <td>${tag.dept || ""}</td>
+        <td>${tag.row || ""}</td>
+        <td>${tag.deptLot || ""}</td>
+        <td>${tag.supplier || ""}</td>
+        <td>${tag.type || ""}</td>
+        <td>${tag.color || ""}</td>
+        <td>${tag.format || ""}</td>
+        <td>${tag.pounds || ""}</td>
+        <td>${tag.price || ""}</td>
+        <td>${tag.freight || ""}</td>
+        <td>${tag.toll || ""}</td>
+        <td>${tag.date || ""}</td>
+      `;
+      tbody.prepend(row);
+      updateTagCount();
+    }
+
+    // Update tag count display
+    function updateTagCount() {
+      const count = document.querySelector("#scanDataTable tbody").children.length;
+      document.getElementById("count").innerText = count;
+    }
+
+    // Timer functions for scanning duration
+    function startTimer() {
+      if (timerInterval) clearInterval(timerInterval);
+      startTime = new Date();
+      timerInterval = setInterval(updateTimer, 1000);
+    }
+    function stopTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+    }
+    function updateTimer() {
+      if (!startTime) return;
+      const now = new Date();
+      const diff = Math.floor((now - startTime) / 1000);
+      const hrs = String(Math.floor(diff / 3600)).padStart(2, '0');
+      const mins = String(Math.floor((diff % 3600) / 60)).padStart(2, '0');
+      const secs = String(diff % 60).padStart(2, '0');
+      document.getElementById('timer').innerText = `${hrs}:${mins}:${secs}`;
+    }
+    function resetTimerDisplay() {
+      document.getElementById('timer').innerText = '00:00:00';
+      startTime = null;
+      stopTimer();
+    }
+
+    // Control button event listeners
+    document.getElementById('startBtn').addEventListener('click', function() {
+      fetch('/api/start')
+        .then(resp => resp.json())
+        .then(data => {
+          showTemporaryMessage(data.message, "green");
+          isScanning = true;
+          document.getElementById('scanningStatus').innerText = "🟢 Scanning...";
+          document.getElementById('scanningStatus').style.color = "green";
+          startTimer();
+        });
+    });
+    document.getElementById('pauseBtn').addEventListener('click', function() {
+      fetch('/api/pause')
+        .then(resp => resp.json())
+        .then(data => {
+          showTemporaryMessage(data.message, "orange");
+          isScanning = false;
+          document.getElementById('scanningStatus').innerText = "🟠 Paused";
+          document.getElementById('scanningStatus').style.color = "orange";
+          stopTimer();
+        });
+    });
+    document.getElementById('stopBtn').addEventListener('click', function() {
+      fetch('/api/stop')
+        .then(resp => resp.json())
+        .then(data => {
+          showTemporaryMessage(data.message, "red");
+          isScanning = false;
+          document.getElementById('scanningStatus').innerText = "🔴 Not Scanning";
+          document.getElementById('scanningStatus').style.color = "red";
+          stopTimer();
+        });
+    });
+    document.getElementById('clearBtn').addEventListener('click', function() {
+      if (!confirm("Are you sure you want to CLEAR all data?")) return;
+      fetch('/api/clear')
+        .then(resp => resp.json())
+        .then(data => {
+          showTemporaryMessage(data.message, "blue");
+          document.querySelector("#scanDataTable tbody").innerHTML = "";
+          resetTimerDisplay();
+          updateTagCount();
+        });
+    });
+    document.getElementById('exportBtn').addEventListener('click', function() {
+      window.location = '/api/export';
+    });
+    document.getElementById('searchBtn').addEventListener('click', function() {
+      // Implement search/filter logic if desired
+    });
+    document.getElementById('clearSearchBtn').addEventListener('click', function() {
+      document.getElementById('searchInput').value = "";
+      // Reset filter if implemented
+    });
+    document.getElementById('findBoxBtn').addEventListener('click', function() {
+      openFindBoxModal();
+    });
+    document.getElementById('closeFindBox').addEventListener('click', function() {
+      closeFindBoxModal();
+    });
+    document.getElementById('searchBoxBtn').addEventListener('click', function() {
+      findBox();
+    });
+
+    // Modal functions for "Find a Box"
+    function openFindBoxModal() {
+      document.getElementById('findBoxModal').style.display = "flex";
+      document.getElementById('findBoxInput').value = "";
+      updateSignalIndicator(0);
+    }
+    function closeFindBoxModal() {
+      document.getElementById('findBoxModal').style.display = "none";
+    }
+    function findBox() {
+      const searchText = document.getElementById('findBoxInput').value.trim().toLowerCase();
+      if (!searchText) {
+        alert("Please enter an ASCII tag value.");
+        return;
+      }
+      const rows = document.querySelectorAll("#scanDataTable tbody tr");
+      let found = false;
+      rows.forEach(row => {
+        if (row.innerText.toLowerCase().includes(searchText)) {
+          row.style.backgroundColor = "yellow";
+          found = true;
+        }
+      });
+      if (!found) {
+        alert("No matching tag found.");
+        updateSignalIndicator(0);
+      }
+    }
+    function scaleForRSSI(rssi) {
+      rssi = Math.max(-90, Math.min(rssi, -50));
+      return (-rssi * 0.025 + 3.25);
+    }
+    function updateSignalIndicator(rssi) {
+      const indicator = document.getElementById('signalIndicator');
+      if(rssi === 0) {
+        indicator.style.transform = "scale(1)";
+        indicator.style.backgroundColor = "rgba(37,64,143,0.5)";
+      } else {
+        const scaleVal = scaleForRSSI(rssi);
+        indicator.style.transform = "scale(" + scaleVal + ")";
+        let intensity = Math.round(50 + ((-rssi - 50) / 40) * 205);
+        indicator.style.backgroundColor = "rgba(37,64,143," + (intensity/255).toFixed(2) + ")";
+      }
+    }
+
+    // Temporary message display
+    function showTemporaryMessage(msg, color="blue") {
+      const el = document.getElementById('statusMessage');
+      el.innerText = msg;
+      el.style.color = color;
+      el.style.visibility = "visible";
+      setTimeout(() => { el.style.visibility = "hidden"; }, 3000);
+    }
+  </script>
+</body>
+</html>

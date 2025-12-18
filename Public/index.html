@@ -1,0 +1,1038 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" charset="utf-8">
+  <title>Inventory Scanning</title>
+  <!-- Load Chart.js from CDN for the pie chart -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    /* Base and Background */
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(rgba(255,255,255,0.85), rgba(255,255,255,0.85)),
+                  url('Media/RockvilleFront.jpg') no-repeat center center fixed;
+      background-size: 75% auto;
+      background-position: right;
+      background-attachment: fixed;
+      color: #333;
+    }
+    /* Left Navigation Pane */
+    .left-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 200px;
+      height: 100%;
+      background: rgba(146,208,80,0.95);
+      box-shadow: 2px 0 4px rgba(0,0,0,0.1);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 20px;
+    }
+    .nav-header {
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .nav-header img {
+      max-width: 80%;
+      height: auto;
+    }
+    .left-nav ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      width: 100%;
+    }
+    .left-nav li {
+      margin: 10px 0;
+      text-align: center;
+    }
+    .left-nav li a {
+      color: #fff;
+      text-decoration: none;
+      font-size: 18px;
+      display: block;
+      padding: 10px 0;
+      transition: background 0.3s;
+    }
+    .left-nav li a:hover {
+      background: rgba(37,64,143,1);
+    }
+    /* Top Bar */
+    .top-bar {
+      position: fixed;
+      top: 0;
+      left: 200px; /* Adjust according to nav width */
+      width: calc(100% - 200px);
+      height: 110px;
+      background: rgba(146,208,80,0.95);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      z-index: 1000;
+      border-radius: 0;
+    }
+    .top-bar h1 {
+      color: rgba(37,64,143,1);
+      font-size: 36px;
+      margin: 0 auto;
+      text-align: center;
+      flex-grow: 1;
+    }
+    .top-bar img {
+      max-height: 80px;
+      width: auto;
+    }
+    /* Main Content */
+    .content {
+      margin: 120px 120px 20px 220px; /* left margin adjusted for nav */
+      padding: 20px;
+    }
+    /* Controls (Buttons & Status) */
+    .controls, .statsBox, .search-controls {
+      background: rgba(255,255,255,0.9);
+      border: 1px solid rgba(200,200,200,0.7);
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      padding: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    /* Main Controls Container */
+    #mainControls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    #leftControls, #rightControls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    #statusContainer {
+      text-align: center;
+      flex-grow: 1;
+    }
+    .controls button {
+      font-size: 20px;
+      padding: 12px 24px;
+      border: none;
+      background-color: rgba(37,64,143,1);
+      color: #fff;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: transform 0.3s ease, background-color 0.3s ease;
+    }
+    .controls button:hover {
+      background-color: rgba(37,64,143,0.9);
+      transform: translateY(-2px);
+    }
+    .status-bar {
+      font-size: 26px;
+      font-weight: bold;
+      min-height: 30px;
+    }
+    #timer {
+      font-size: 26px;
+      font-weight: bold;
+    }
+    /* Enlarged Reader Connection Status */
+    #connectionStatus {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      margin-top: 5px;
+      font-size: 18px;
+    }
+    .statusIcon {
+      font-size: 28px;
+      text-shadow: 0 0 5px rgba(0,0,0,0.3);
+    }
+    /* Search Controls */
+    .search-controls label {
+      font-size: 18px;
+      font-weight: bold;
+    }
+    .search-controls input {
+      width: 200px;
+      font-size: 16px;
+      padding: 8px;
+    }
+    .search-controls button {
+      font-size: 16px;
+      padding: 8px 16px;
+    }
+    /* Modern Table Styling */
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 20px;
+      background: #fff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    table th, table td {
+      padding: 12px 15px;
+      font-size: 18px;
+      text-align: left;
+    }
+    table th {
+      background-color: #f2f2f2;
+      border-bottom: 2px solid #ddd;
+      cursor: pointer;
+      user-select: none;
+    }
+    table tr:nth-child(even) {
+      background-color: #f9f9f9;
+    }
+    table tr:hover {
+      background-color: #e9e9e9;
+    }
+    /* Pagination Controls */
+    #paginationControls {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 5px;
+    }
+    #paginationControls button {
+      padding: 6px 12px;
+      font-size: 16px;
+    }
+    /* Stats Section Layout */
+    #statsContainer {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    /* Left Stats: Two distinct boxes stacked vertically */
+    #leftStats {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      flex: 1;
+      min-width: 250px;
+    }
+    .statsBox {
+      background: rgba(255,255,255,0.9);
+      border: 1px solid rgba(200,200,200,0.7);
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      padding: 10px;
+    }
+    .statsBox h3 {
+      margin-top: 0;
+      margin-bottom: 10px;
+      text-align: center;
+    }
+    .statsBox table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .statsBox table td {
+      padding: 5px 10px;
+    }
+    /* Right Stats: For the Pie Chart */
+    #chartContainer {
+      flex: 1;
+      min-width: 250px;
+      text-align: center;
+      padding: 10px;
+      background: rgba(255,255,255,0.9);
+      border: 1px solid rgba(200,200,200,0.7);
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    #chartContainer h3 {
+      margin-top: 0;
+      margin-bottom: 10px;
+    }
+    /* Increase the size of the pie chart canvas */
+    #lotTypeChart {
+      width: 400px !important;
+      height: 400px !important;
+    }
+    /* Modal for inline Record Options */
+    #recordOptionsPopup {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      border: 1px solid #ccc;
+      padding: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+      z-index: 2000;
+      display: none;
+      width: 300px;
+      text-align: center;
+    }
+    #recordOptionsPopup button {
+      font-size: 16px;
+      padding: 8px 12px;
+      margin: 5px;
+    }
+    #recordOptionsPopup .closePopup {
+      position: absolute;
+      top: 5px;
+      right: 10px;
+      cursor: pointer;
+      font-size: 20px;
+    }
+    /* Modal for "Find a Box" */
+    #findBoxModal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+    }
+    #findBoxModalContent {
+      background: #fff;
+      padding: 30px;
+      border-radius: 8px;
+      text-align: center;
+      width: 400px;
+      position: relative;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.3);
+    }
+    #findBoxModalContent input {
+      font-size: 18px;
+      padding: 10px;
+      width: 80%;
+      margin-bottom: 15px;
+    }
+    #signalIndicator {
+      width: 70px;
+      height: 70px;
+      background-color: rgba(37,64,143,0.5);
+      border-radius: 50%;
+      margin: 20px auto;
+      transition: transform 0.5s, background-color 0.5s;
+    }
+    .closeModal {
+      position: absolute;
+      top: 10px;
+      right: 15px;
+      cursor: pointer;
+      font-size: 24px;
+    }
+    .total-row td {
+      font-weight: 700;
+      border-top: 2px solid #ddd;
+    }
+    /* Tiny CSS win: clickable rows */
+    #tagsTable tbody tr { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <!-- Left Navigation Pane -->
+  <div class="left-nav">
+    <div class="nav-header">
+      <img src="Media/companylogo.png" alt="Company Logo">
+    </div>
+    <ul>
+      <li><a href="index.html" class="navLink">Scanning</a></li>
+      <li><a href="findBox.html" class="navLink">Find a Box</a></li>
+      <li><a href="sharepoint.html" class="navLink">Scan Data</a></li>
+      <li><a href="liveScan.html" class="navLink">Live Data Scan</a></li>
+    </ul>
+  </div>
+
+  <!-- Top Bar -->
+  <div class="top-bar">
+    <h1>Inventory Scanning&nbsp; &nbsp; &nbsp;&nbsp;</h1>
+    <img src="Media/grouplogo.png" alt="Group Logo">
+  </div>
+
+  <!-- Main Content -->
+  <div class="content">
+    <!-- Main Controls: Buttons and Timer/Status -->
+    <div class="controls" id="mainControls">
+      <div id="leftControls">
+        <button id="startBtn">Start</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="stopBtn">Stop</button>
+      </div>
+      <div id="statusContainer">
+        <span id="timer">00:00:00</span><br>
+        <span id="scanningStatus">🔴 Not Scanning</span>
+        <div id="connectionStatus">
+          <span id="reader1Status">Reader8Port: <span class="statusIcon" style="color:green;">●</span></span>
+          <span id="reader2Status">Reader4Port: <span class="statusIcon" style="color:green;">●</span></span>
+        </div>
+      </div>
+      <div id="rightControls">
+        <button id="clearBtn">Clear Data</button>
+        <button id="exportBtn">Export XLSX</button>
+        <!-- NEW: Export Filtered -->
+        <button id="exportFilteredBtn">Export Filtered</button>
+      </div>
+    </div>
+	  
+    <!-- Temporary status messages -->
+    <div class="status-bar" id="statusMessage"></div>
+
+    <!-- Stats Section -->
+    <div id="statsContainer">
+      <!-- Left Stats: Two distinct boxes for ASCII Lot Types and ASCII Lengths -->
+      <div id="leftStats">
+        <div class="statsBox" id="lotTypeStats">
+          <h3>ASCII Lot Types</h3>
+          <table>
+            <tr><td>PL:</td><td id="plCount">0 (0%)</td></tr>
+            <tr><td>FF:</td><td id="ffCount">0 (0%)</td></tr>
+            <tr><td>BL:</td><td id="blCount">0 (0%)</td></tr>
+            <tr><td>GL:</td><td id="glCount">0 (0%)</td></tr>
+            <tr><td>Other:</td><td id="otherCount">0 (0%)</td></tr>
+            <tr class="total-row"><td>Total:</td><td id="lotTypeTotal">0</td></tr>
+          </table>
+        </div>
+
+        <div class="statsBox" id="asciiLengthStats">
+          <h3>ASCII Lengths</h3>
+          <table>
+            <tr><td>8 chars:</td><td id="len8Count">0 (0%)</td></tr>
+            <tr><td>12 chars:</td><td id="len12Count">0 (0%)</td></tr>
+            <tr><td>16 chars:</td><td id="len16Count">0 (0%)</td></tr>
+            <tr><td>Other Length:</td><td id="lenOtherCount">0 (0%)</td></tr>
+            <tr class="total-row"><td>Total:</td><td id="lenTotal">0</td></tr>
+          </table>
+        </div>
+
+      </div>
+      <!-- Right Stats: Lot Type Pie Chart -->
+      <div class="statsBox" id="chartContainer">
+        <h3>Lot Type Pie Chart</h3>
+        <canvas id="lotTypeChart" width="400" height="400"></canvas>
+      </div>
+    </div>
+
+    <!-- Search Controls Row -->
+    <div class="controls search-controls">
+      <label for="searchInput">Search ASCII:</label>
+      <input id="searchInput" type="text" placeholder="e.g. PL002314" />
+      <button id="searchBtn">Search</button>
+      <button id="clearSearchBtn">Clear Search</button>
+    </div>
+    <!-- Tag List Table -->
+    <h2>Tag List (Filtered): <span id="count">0</span></h2>
+    <table id="tagsTable">
+      <thead>
+        <tr>
+          <th onclick="sortTags('firstSeen')">First Seen</th>
+          <th>TID (Hex)</th>
+          <th>EPC (Hex)</th>
+          <th onclick="sortTags('epcAscii')">ASCII</th>
+          <th>RSSI</th>
+          <th>SeenCount</th>
+        </tr>
+      </thead>
+      <tbody id="tagsBody">
+        <!-- Populated by JavaScript -->
+      </tbody>
+    </table>
+    <!-- Pagination Controls (dynamically rendered) -->
+    <div id="paginationControls"></div>
+  </div>
+
+  <!-- Inline Record Options Popup -->
+  <div id="recordOptionsPopup">
+    <span class="closePopup" id="closePopup">&times;</span>
+    <p id="popupMessage">Options for record: <span id="popupRecord"></span></p>
+    <button id="popupFindBoxBtn">Find Box</button>
+    <button id="popupPullSPBtn">Pull SharePoint Data</button>
+    <!-- NEW: Copy ASCII quick hitter -->
+    <button id="popupCopyAsciiBtn">Copy ASCII</button>
+    <div id="sharepointData" style="margin-top:10px; display:none;"></div>
+  </div>
+
+  <!-- Modal for "Find a Box" -->
+  <div id="findBoxModal">
+    <div id="findBoxModalContent">
+      <span class="closeModal" id="closeFindBox">&times;</span>
+      <h3>Find a Box</h3>
+      <input type="text" id="findBoxInput" placeholder="Enter ASCII text" />
+      <br>
+      <button id="searchBoxBtn">Search Box</button>
+      <!-- Additional button to query SharePoint for this item -->
+      <button id="querySharepointBtn">Query Sharepoint</button>
+      <div id="signalIndicator"></div>
+    </div>
+  </div>
+
+  <!-- Include Socket.IO client library -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    let allTags = []; // master list
+    let timerInterval = null;
+    let startTime = null;
+    let elapsedTime = 0;
+    let isScanning = false;
+    let currentSort = 'firstSeen'; // default sort
+    let lotChart = null;
+    let currentPage = 1;
+    const pageSize = 500; // Changed from 1000 to 500
+
+    // NEW: hold last filtered results and an optional lot-type filter
+    let lastFiltered = [];
+    let lotTypeFilter = null; // 'PL'|'FF'|'BL'|'GL'|'Other'|null
+
+    // Throttle UI work from socket/poll
+    let pendingRerender = false;
+    function scheduleRerender() {
+      if (pendingRerender) return;
+      pendingRerender = true;
+      requestAnimationFrame(() => {
+        applyFilter();
+        pendingRerender = false;
+      });
+    }
+
+    // Socket & polling coordination
+    const socket = io();
+    let pollTimer = null;
+    function startPolling(intervalMs = 60000) {
+      clearInterval(pollTimer);
+      pollTimer = setInterval(refreshTags, intervalMs);
+    }
+    socket.on('connect', () => startPolling(60000));
+    socket.on('disconnect', () => startPolling(3000));
+
+    // Socket events (throttled + precompute fields)
+    socket.on('newTag', tag => {
+      const ex = allTags.find(t => t.epcHex === tag.epcHex);
+      if (ex) {
+        ex.seenCount = tag.seenCount;
+        ex.rssi = tag.rssi;
+      } else {
+        tag._ascii = (tag.epcAscii || "").toLowerCase();
+        tag._ts = Date.parse(tag.firstSeen || 0) || 0;
+        allTags.push(tag);
+      }
+      scheduleRerender();
+    });
+    socket.on('clearData', function() {
+      allTags = [];
+      renderTags([]);
+      resetTimerDisplay();
+      updateStats();
+    });
+
+    // Don’t block on window.onload; wire up on DOMContentLoaded
+    document.addEventListener('DOMContentLoaded', () => { init(); });
+
+    function init() {
+      // Restore UI state from URL
+      restoreStateFromUrl();
+
+      // Initial fetch
+      refreshTags();
+
+      // Events
+      document.getElementById('startBtn').addEventListener('click', startScan);
+      document.getElementById('pauseBtn').addEventListener('click', pauseScan);
+      document.getElementById('stopBtn').addEventListener('click', stopScan);
+      document.getElementById('clearBtn').addEventListener('click', clearData);
+      document.getElementById('exportBtn').addEventListener('click', exportData);
+      // NEW: export filtered
+      document.getElementById('exportFilteredBtn').addEventListener('click', exportFiltered);
+
+      document.getElementById('searchBtn').addEventListener('click', () => { currentPage = 1; applyFilter(); });
+      document.getElementById('clearSearchBtn').addEventListener('click', () => {
+        document.getElementById('searchInput').value = "";
+        currentPage = 1;
+        applyFilter();
+      });
+      // Enter-to-search
+      document.getElementById('searchInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { currentPage = 1; applyFilter(); }
+      });
+
+      const findBoxBtnEl = document.getElementById('findBoxBtn');
+      if (findBoxBtnEl) {
+        findBoxBtnEl.addEventListener('click', openFindBoxModal);
+      }
+      document.getElementById('closeFindBox').addEventListener('click', closeFindBoxModal);
+      document.getElementById('searchBoxBtn').addEventListener('click', findBox);
+      document.getElementById('closePopup').addEventListener('click', closeRecordOptionsPopup);
+      document.getElementById('popupFindBoxBtn').addEventListener('click', function() {
+        stopScan();
+        const recordAscii = document.getElementById('popupRecord').innerText;
+        window.location.href = "findBox.html?tag=" + encodeURIComponent(recordAscii);
+      });
+      document.getElementById('popupPullSPBtn').addEventListener('click', function() {
+        document.getElementById('sharepointData').style.display = "block";
+        document.getElementById('sharepointData').innerText = "Lot: PL, Type: Standard, Color: Blue, Pounds: 10, Price: $50";
+      });
+      // Copy ASCII quick hitter
+      document.getElementById('popupCopyAsciiBtn').addEventListener('click', async () => {
+        const txt = document.getElementById('popupRecord').innerText;
+        try { await navigator.clipboard.writeText(txt); showTemporaryMessage("ASCII copied", "green"); }
+        catch { showTemporaryMessage("Copy failed", "red"); }
+      });
+
+      // Future-proof beforeunload
+      window.addEventListener("beforeunload", function (e) {
+        if (isScanning) {
+          e.preventDefault();
+          e.returnValue = true;
+        }
+      });
+    }
+
+    // Defensive fetch helper
+    function safeJson(r){ if(!r.ok) throw new Error(r.status); return r.json(); }
+
+    // Timer Functions with Pause/Resume Support
+    function startScan() {
+      fetch('/api/start')
+        .then(safeJson)
+        .then(data => {
+          showTemporaryMessage(data.message || "Started", "green");
+          isScanning = true;
+          document.getElementById('scanningStatus').innerText = "🟢 Scanning...";
+          document.getElementById('scanningStatus').style.color = "green";
+          if (elapsedTime) {
+            startTime = new Date(new Date() - elapsedTime);
+          } else {
+            startTime = new Date();
+          }
+          startTimer();
+        })
+        .catch(() => showTemporaryMessage("Failed to start scan", "red"));
+    }
+    function pauseScan() {
+      fetch('/api/pause')
+        .then(safeJson)
+        .then(data => {
+          showTemporaryMessage(data.message || "Paused", "orange");
+          isScanning = false;
+          document.getElementById('scanningStatus').innerText = "🟠 Paused";
+          document.getElementById('scanningStatus').style.color = "orange";
+          elapsedTime = new Date() - startTime;
+          stopTimer();
+        })
+        .catch(() => showTemporaryMessage("Failed to pause scan", "red"));
+    }
+    function stopScan() {
+      fetch('/api/stop')
+        .then(safeJson)
+        .then(data => {
+          showTemporaryMessage(data.message || "Stopped", "red");
+          isScanning = false;
+          document.getElementById('scanningStatus').innerText = "🔴 Not Scanning";
+          document.getElementById('scanningStatus').style.color = "red";
+          stopTimer();
+          elapsedTime = 0;
+        })
+        .catch(() => showTemporaryMessage("Failed to stop scan", "red"));
+    }
+    function clearData() {
+      if (!confirm("Are you sure you want to CLEAR all data?")) return;
+      fetch('/api/clear')
+        .then(safeJson)
+        .then(data => {
+          showTemporaryMessage(data.message || "Cleared", "blue");
+          allTags = [];
+          renderTags([]);
+          resetTimerDisplay();
+          updateStats();
+        })
+        .catch(() => showTemporaryMessage("Failed to clear data", "red"));
+    }
+    function exportData() {
+      window.location = '/api/export';
+    }
+
+    // NEW: export current filtered rows (CSV)
+    function exportFiltered() {
+      const rows = lastFiltered || [];
+      if (!rows.length) { showTemporaryMessage("No rows to export", "orange"); return; }
+      const header = ["First Seen","TID (Hex)","EPC (Hex)","ASCII","RSSI","SeenCount"];
+      const lines = [header.join(",")];
+      for (const t of rows) {
+        const cols = [
+          t._ts ? new Date(t._ts).toISOString() : "",
+          t.tidHex || "",
+          t.epcHex || "",
+          (t.epcAscii || "").replace(/"/g,'""'),
+          (t.rssi ?? "").toString(),
+          (t.seenCount ?? "").toString()
+        ];
+        // Basic CSV escaping
+        lines.push(cols.map(v => /[",\n]/.test(v) ? `"${v}"` : v).join(","));
+      }
+      const blob = new Blob([lines.join("\n")], {type:"text/csv;charset=utf-8"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'filtered_tags.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function startTimer() {
+      if (timerInterval) clearInterval(timerInterval);
+      timerInterval = setInterval(updateTimer, 1000);
+    }
+    function stopTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+    }
+    function resetTimerDisplay() {
+      document.getElementById('timer').innerText = '00:00:00';
+      startTime = null;
+      elapsedTime = 0;
+      stopTimer();
+    }
+    function updateTimer() {
+      if (!startTime) return;
+      const now = new Date();
+      const diff = Math.floor((now - startTime) / 1000);
+      const hrs = String(Math.floor(diff / 3600)).padStart(2, '0');
+      const mins = String(Math.floor((diff % 3600) / 60)).padStart(2, '0');
+      const secs = String(diff % 60).padStart(2, '0');
+      document.getElementById('timer').innerText = `${hrs}:${mins}:${secs}`;
+    }
+
+    // Refresh and Filtering (with precompute)
+    function refreshTags() {
+      fetch('/api/tags')
+        .then(r => r.ok ? r.json() : Promise.reject(r.status))
+        .then(tags => {
+          tags.forEach(t => {
+            t._ascii = (t.epcAscii || "").toLowerCase();
+            t._ts = Date.parse(t.firstSeen || 0) || 0;
+          });
+          allTags = tags;
+          applyFilter();
+        })
+        .catch(err => console.error("Error fetching tags:", err));
+    }
+
+    // NEW: helper for lot type matching
+    function matchesLotType(ascii, ltype) {
+      if (!ltype) return true;
+      if (!ascii) return ltype === 'Other';
+      if (ltype === 'Other') {
+        return !(ascii.startsWith('PL') || ascii.startsWith('FF') || ascii.startsWith('BL') || ascii.startsWith('GL'));
+      }
+      return ascii.startsWith(ltype);
+    }
+
+    function applyFilter() {
+      const q = document.getElementById('searchInput').value.trim().toLowerCase();
+      let filtered = allTags;
+
+      if (q) filtered = filtered.filter(t => (t._ascii || "").includes(q));
+      if (lotTypeFilter) {
+        filtered = filtered.filter(t => matchesLotType(t.epcAscii || "", lotTypeFilter));
+      }
+
+      if (currentSort === 'firstSeen') {
+        filtered = [...filtered].sort((a, b) => b._ts - a._ts);
+      } else if (currentSort === 'epcAscii') {
+        filtered = [...filtered].sort((a, b) => (a._ascii || "").localeCompare(b._ascii || ""));
+      }
+
+      lastFiltered = filtered; // save for export
+      renderTags(filtered);
+      updateStats();
+
+      // Sync URL state
+      syncStateToUrl();
+    }
+
+    function renderTags(tags) {
+      const tbody = document.getElementById('tagsBody');
+      tbody.innerHTML = "";
+      const totalPages = Math.ceil(tags.length / pageSize) || 1;
+      if(currentPage > totalPages) currentPage = totalPages;
+
+      const start = (currentPage - 1) * pageSize;
+      const pageTags = tags.slice(start, start + pageSize);
+
+      const frag = document.createDocumentFragment();
+      for (const t of pageTags) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${t._ts ? new Date(t._ts).toLocaleString() : ""}</td>
+          <td>${t.tidHex || ""}</td>
+          <td>${t.epcHex || ""}</td>
+          <td>${t.epcAscii || ""}</td>
+          <td>${t.rssi ?? ""}</td>
+          <td>${t.seenCount ?? ""}</td>
+        `;
+        tr.addEventListener('click', (e) => { e.stopPropagation(); openRecordOptionsPopup(t); });
+        frag.appendChild(tr);
+      }
+      tbody.appendChild(frag);
+
+      document.getElementById('count').innerText = tags.length;
+      renderPagination(totalPages, currentPage);
+    }
+
+    function changePage(newPage) {
+      if(newPage < 1) return;
+      const q = document.getElementById('searchInput').value.trim().toLowerCase();
+      let filtered = allTags;
+      if (q) filtered = filtered.filter(t => (t._ascii || "").includes(q));
+      if (lotTypeFilter) filtered = filtered.filter(t => matchesLotType(t.epcAscii || "", lotTypeFilter));
+      const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+      if(newPage > totalPages) return;
+      currentPage = newPage;
+      applyFilter();
+    }
+
+    function sortTags(field) {
+      currentSort = field;
+      applyFilter();
+    }
+
+    function showTemporaryMessage(msg, color="blue") {
+      const el = document.getElementById('statusMessage');
+      el.innerText = msg;
+      el.style.color = color;
+      el.style.visibility = "visible";
+      setTimeout(() => { el.style.visibility = "hidden"; }, 3000);
+    }
+
+    // Pagination UX polish
+    function renderPagination(totalPages, currentPage) {
+      const c = document.getElementById('paginationControls');
+      c.innerHTML = "";
+
+      const mkBtn = (txt, fn, disabled=false) => {
+        const b = document.createElement('button');
+        b.textContent = txt;
+        b.disabled = disabled;
+        if (!disabled) b.addEventListener('click', fn);
+        return b;
+      };
+
+      c.appendChild(mkBtn("First", () => changePage(1), currentPage === 1));
+      c.appendChild(mkBtn("Previous", () => changePage(currentPage - 1), currentPage === 1));
+
+      const label = document.createElement('span');
+      label.style.margin = '0 8px';
+      label.textContent = `Page ${currentPage} of ${totalPages}`;
+      c.appendChild(label);
+
+      c.appendChild(mkBtn("Next", () => changePage(currentPage + 1), currentPage === totalPages));
+      c.appendChild(mkBtn("Last", () => changePage(totalPages), currentPage === totalPages));
+    }
+
+    // Stats update functions - percentages are added
+    function updateStats() {
+      let pl = 0, ff = 0, bl = 0, gl = 0, other = 0;
+      let len8 = 0, len12 = 0, len16 = 0, lenOther = 0;
+      allTags.forEach(tag => {
+        const ascii = tag.epcAscii || "";
+        if(ascii.startsWith("PL")) pl++;
+        else if(ascii.startsWith("FF")) ff++;
+        else if(ascii.startsWith("BL")) bl++;
+        else if(ascii.startsWith("GL")) gl++;
+        else other++;
+        const len = ascii.length;
+        if(len === 8) len8++;
+        else if(len === 12) len12++;
+        else if(len === 16) len16++;
+        else lenOther++;
+      });
+      const totalLot = pl + ff + bl + gl + other;
+      const totalLen = len8 + len12 + len16 + lenOther;
+      document.getElementById('plCount').innerText = pl + " (" + (totalLot ? (pl/totalLot*100).toFixed(1) : 0) + "%)";
+      document.getElementById('ffCount').innerText = ff + " (" + (totalLot ? (ff/totalLot*100).toFixed(1) : 0) + "%)";
+      document.getElementById('blCount').innerText = bl + " (" + (totalLot ? (bl/totalLot*100).toFixed(1) : 0) + "%)";
+      document.getElementById('glCount').innerText = gl + " (" + (totalLot ? (gl/totalLot*100).toFixed(1) : 0) + "%)";
+      document.getElementById('otherCount').innerText = other + " (" + (totalLot ? (other/totalLot*100).toFixed(1) : 0) + "%)";
+      document.getElementById('len8Count').innerText = len8 + " (" + (totalLen ? (len8/totalLen*100).toFixed(1) : 0) + "%)";
+      document.getElementById('len12Count').innerText = len12 + " (" + (totalLen ? (len12/totalLen*100).toFixed(1) : 0) + "%)";
+      document.getElementById('len16Count').innerText = len16 + " (" + (totalLen ? (len16/totalLen*100).toFixed(1) : 0) + "%)";
+      document.getElementById('lenOtherCount').innerText = lenOther + " (" + (totalLen ? (lenOther/totalLen*100).toFixed(1) : 0) + "%)";
+      document.getElementById('lotTypeTotal').innerText = totalLot;
+      document.getElementById('lenTotal').innerText   = totalLen;
+      updateLotTypeChart([pl, ff, bl, gl, other]);
+    }
+    
+    function updateLotTypeChart(dataArray) {
+      const canvas = document.getElementById('lotTypeChart');
+      if (!canvas) return; // guard if canvas absent
+      const ctx = canvas.getContext('2d');
+      const total = dataArray.reduce((sum, val) => sum + val, 0);
+
+      if (lotChart) {
+        lotChart.data.datasets[0].data = dataArray;
+        if (lotChart.options.plugins && lotChart.options.plugins.subtitle) {
+          lotChart.options.plugins.subtitle.text = 'Total: ' + total;
+        }
+        lotChart.update();
+        return;
+      }
+
+      lotChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels: ['PL', 'FF', 'BL', 'GL', 'Other'],
+          datasets: [{
+            data: dataArray,
+            backgroundColor: [
+              'rgba(75, 192, 192, 0.7)',
+              'rgba(255, 205, 86, 0.7)',
+              'rgba(255, 99, 132, 0.7)',
+              'rgba(54, 162, 235, 0.7)',
+              'rgba(201, 203, 207, 0.7)'
+            ]
+          }]
+        },
+        options: {
+          responsive: false,
+          maintainAspectRatio: false,
+          animation: { duration: 200 },
+          plugins: {
+            subtitle: {
+              display: true,
+              text: 'Total: ' + total,
+              padding: { top: 6, bottom: 2 }
+            },
+            legend: {
+              position: 'bottom',
+              labels: {
+				font: { size: 16 },
+                generateLabels: function(chart) {
+                  const data = chart.data.datasets[0].data;
+                  const totalNow = data.reduce((sum, val) => sum + val, 0);
+                  const items = chart.data.labels.map((label, i) => {
+                    const value = data[i] || 0;
+                    const percentage = totalNow ? ((value / totalNow) * 100).toFixed(1) : 0;
+                    return {
+                      text: label + ': ' + value + ' (' + percentage + '%)',
+                      fillStyle: chart.data.datasets[0].backgroundColor[i],
+                      strokeStyle: chart.data.datasets[0].backgroundColor[i],
+                      lineWidth: 1,
+                      index: i
+                    };
+                  });
+                  items.push({
+                    text: 'Total: ' + totalNow,
+                    fillStyle: 'rgba(0,0,0,0)',
+                    strokeStyle: 'rgba(0,0,0,0)',
+                    lineWidth: 0,
+                  });
+                  return items;
+                }
+              }
+            }
+          },
+          // NEW: click a slice to toggle the lot type filter
+          onClick: (evt, activeEls) => {
+            const points = lotChart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
+            if (!points.length) return;
+            const idx = points[0].index;
+            const label = lotChart.data.labels[idx]; // 'PL'|'FF'|'BL'|'GL'|'Other'
+            lotTypeFilter = (lotTypeFilter === label) ? null : label;
+            currentPage = 1;
+            applyFilter();
+            showTemporaryMessage(lotTypeFilter ? `Filtered by ${lotTypeFilter}` : "Cleared Lot Type filter", "blue");
+          }
+        }
+      });
+    }
+
+    // "Find a Box" Modal Functions
+    function openRecordOptionsPopup(record) {
+      document.getElementById('popupRecord').innerText = record.epcAscii || "";
+      document.getElementById('sharepointData').style.display = "none";
+      document.getElementById('sharepointData').innerText = "";
+      document.getElementById('recordOptionsPopup').style.display = "block";
+    }
+    function closeRecordOptionsPopup() {
+      document.getElementById('recordOptionsPopup').style.display = "none";
+    }
+    function openFindBoxModal() {
+      document.getElementById('findBoxModal').style.display = "flex";
+    }
+    function closeFindBoxModal() {
+      document.getElementById('findBoxModal').style.display = "none";
+    }
+    function findBox() {
+      const searchText = document.getElementById('findBoxInput').value.trim().toLowerCase();
+      if (!searchText) {
+        alert("Please enter an ASCII tag value.");
+        return;
+      }
+      const matches = allTags.filter(t => (t._ascii || "").includes(searchText));
+      if (matches.length === 0) {
+        alert("No matching tag found.");
+        updateSignalIndicator(-100);
+      } else {
+        const bestMatch = matches.reduce((prev, curr) => (prev.rssi > curr.rssi ? prev : curr));
+        updateSignalIndicator(bestMatch.rssi);
+      }
+    }
+    function scaleForRSSI(rssi) {
+      rssi = Math.max(-90, Math.min(rssi, -50));
+      return (-rssi * 0.025 + 3.25);
+    }
+    function updateSignalIndicator(rssi) {
+      const indicator = document.getElementById('signalIndicator');
+      if(rssi === 0) {
+        indicator.style.transform = "scale(1)";
+        indicator.style.backgroundColor = "rgba(37,64,143,0.5)";
+      } else {
+        const scaleVal = scaleForRSSI(rssi);
+        indicator.style.transform = "scale(" + scaleVal + ")";
+        let intensity = Math.round(50 + ((-rssi - 50) / 40) * 205);
+        indicator.style.backgroundColor = "rgba(37,64,143," + (intensity/255).toFixed(2) + ")";
+      }
+    }
+
+    // NEW: URL state (persist q, sort, page, lot type)
+    function syncStateToUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const q = document.getElementById('searchInput').value.trim();
+      if (q) params.set('q', q); else params.delete('q');
+      params.set('sort', currentSort);
+      params.set('page', String(currentPage));
+      if (lotTypeFilter) params.set('ltype', lotTypeFilter); else params.delete('ltype');
+      const newUrl = `${window.location.pathname}?${params.toString()}`;
+      history.replaceState(null, '', newUrl);
+    }
+
+    function restoreStateFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get('q') || '';
+      const sort = params.get('sort') || 'firstSeen';
+      const page = parseInt(params.get('page') || '1', 10);
+      const ltype = params.get('ltype');
+
+      document.getElementById('searchInput').value = q;
+      currentSort = (sort === 'epcAscii') ? 'epcAscii' : 'firstSeen';
+      currentPage = Number.isFinite(page) && page > 0 ? page : 1;
+      lotTypeFilter = (ltype === 'PL' || ltype === 'FF' || ltype === 'BL' || ltype === 'GL' || ltype === 'Other') ? ltype : null;
+    }
+  </script>
+</body>
+</html>

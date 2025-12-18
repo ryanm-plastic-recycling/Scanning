@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" charset="utf-8">
+  <title>Scan Data & Analysis</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    /* Base & Background */
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(rgba(255,255,255,0.85), rgba(255,255,255,0.85)), url('Media/RockvilleFront.jpg') no-repeat center center fixed;
+      background-size: 75% auto;
+      background-position: right;
+      background-attachment: fixed;
+      color: #333;
+    }
+    /* Left Navigation Pane */
+    .left-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 200px;
+      height: 100%;
+      background: rgba(146,208,80,0.95);
+      box-shadow: 2px 0 4px rgba(0,0,0,0.1);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 20px;
+    }
+    .nav-header {
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .nav-header img {
+      max-width: 80%;
+      height: auto;
+    }
+    .left-nav ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      width: 100%;
+    }
+    .left-nav li {
+      margin: 10px 0;
+      text-align: center;
+    }
+    .left-nav li a {
+      color: #fff;
+      text-decoration: none;
+      font-size: 18px;
+      display: block;
+      padding: 10px 0;
+      transition: background 0.3s;
+    }
+    .left-nav li a:hover {
+      background: rgba(37,64,143,1);
+    }
+    /* Top Bar */
+    .top-bar {
+      position: fixed;
+      top: 0;
+      left: 200px;
+      width: calc(100% - 200px);
+      height: 110px;
+      background: rgba(146,208,80,0.95);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      z-index: 1000;
+    }
+    .top-bar h1 {
+      color: rgba(37,64,143,1);
+      font-size: 36px;
+      margin: 0 auto;
+      text-align: center;
+      flex-grow: 1;
+    }
+    .top-bar img {
+      max-height: 80px;
+      width: auto;
+    }
+    /* Main Content */
+    .content {
+      margin: 120px 120px 20px 220px;
+      padding: 20px;
+    }
+    /* Controls & Stats */
+    .controls, .statsBox {
+      background: rgba(255,255,255,0.9);
+      border: 1px solid rgba(200,200,200,0.7);
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      padding: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    #dataButton {
+      font-size: 20px;
+      padding: 12px 24px;
+      border: none;
+      background-color: rgba(37,64,143,1);
+      color: #fff;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: transform 0.3s ease, background-color 0.3s ease;
+    }
+    #dataButton:hover {
+      background-color: rgba(37,64,143,0.9);
+      transform: translateY(-2px);
+    }
+    /* Spinner Styles */
+    #spinnerContainer {
+      text-align: center;
+      margin-bottom: 10px;
+      display: none; /* Hidden by default */
+    }
+    /* Stats Section Layout */
+    #statsContainer {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    #leftStats, #rightStats {
+      flex: 1;
+      min-width: 250px;
+    }
+    .statsBox h3 {
+      margin-top: 0;
+      margin-bottom: 10px;
+      text-align: center;
+    }
+    /* Pie Chart Container */
+    #pieChartsContainer {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    .pieChartBox {
+      background: rgba(255,255,255,0.9);
+      border: 1px solid rgba(200,200,200,0.7);
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      padding: 10px;
+      text-align: center;
+      flex: 1;
+      min-width: 250px;
+    }
+    /* Modern Table Styling */
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      background: #fff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      margin-top: 20px;
+    }
+    table th, table td {
+      padding: 12px 15px;
+      font-size: 18px;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+    }
+    table th {
+      background-color: #f2f2f2;
+      cursor: pointer;
+      user-select: none;
+    }
+    table tr:nth-child(even) {
+      background-color: #f9f9f9;
+    }
+    table tr:hover {
+      background-color: #e9e9e9;
+    }
+  </style>
+</head>
+<body>
+  <!-- Left Navigation Pane -->
+  <div class="left-nav">
+    <div class="nav-header">
+      <img src="Media/companylogo.png" alt="Company Logo">
+    </div>
+    <ul>
+      <li><a href="index.html">Scanning</a></li>
+      <li><a href="findBox.html">Find a Box</a></li>
+      <li><a href="sharepoint.html">Scan Data</a></li>
+	  <li><a href="liveScan.html">Live Data Scan</a></li>
+    </ul>
+  </div>
+
+  <!-- Top Bar -->
+  <div class="top-bar">
+    <h1>Scan Data & Analysis</h1>
+    <img src="Media/grouplogo.png" alt="Group Logo">
+  </div>
+
+  <!-- Main Content -->
+  <div class="content">
+    <!-- Data Refresh Button -->
+    <div class="controls" id="dataRefreshControl">
+      <button id="dataButton">Refresh Data from Scanning Page</button>
+    </div>
+    
+    <!-- Spinner: Shown while data is being pulled -->
+    <div id="spinnerContainer">
+      <img src="Media/spinner.gif" alt="Loading..." />
+    </div>
+
+    <!-- Stats Section: Charts and Top Suppliers Table -->
+    <div id="statsContainer">
+      <!-- Left Stats: Tag Counts for PL, FF, BL, GL -->
+      <div class="statsBox" id="tagCountsStats">
+        <h3>Tag Counts</h3>
+        <table>
+          <tr><td>PL:</td><td id="plCount">0</td></tr>
+          <tr><td>FF:</td><td id="ffCount">0</td></tr>
+          <tr><td>BL:</td><td id="blCount">0</td></tr>
+          <tr><td>GL:</td><td id="glCount">0</td></tr>
+        </table>
+      </div>
+      <!-- Right Stats: Top 10 Suppliers -->
+      <div class="statsBox" id="topSuppliers">
+        <h3>Top 10 Suppliers</h3>
+        <table id="topSuppliersTable">
+          <thead>
+            <tr>
+              <th>Supplier</th>
+              <th>Total Pounds</th>
+              <th>Types</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Dynamically populated -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Pie Charts Section: Based on summation of pounds for Type and Color -->
+    <div id="pieChartsContainer">
+      <div class="pieChartBox">
+        <h3>Type Distribution (by Pounds)</h3>
+        <canvas id="typePieChart" width="200" height="200"></canvas>
+      </div>
+      <div class="pieChartBox">
+        <h3>Color Distribution (by Pounds)</h3>
+        <canvas id="colorPieChart" width="200" height="200"></canvas>
+      </div>
+    </div>
+
+    <!-- Data Table with Updated Columns -->
+    <h2>Scan Data Table</h2>
+    <table id="scanDataTable">
+      <thead>
+        <tr>
+          <th>First Seen</th>
+          <th>TID (Hex)</th>
+          <th>EPC (Hex)</th>
+          <th>ASCII</th>
+          <th>RSSI</th>
+          <th>SeenCount</th>
+          <th>LOT</th>
+          <th>DEPT</th>
+          <th>ROW</th>
+          <th>DEPT LOT</th>
+          <th>SUPPLIER</th>
+          <th>TYPE</th>
+          <th>COLOR</th>
+          <th>FORMAT</th>
+          <th>POUNDS</th>
+          <th>PRICE</th>
+          <th>FREIGHT</th>
+          <th>TOLL</th>
+          <th>DATE</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Data rows populated via JavaScript -->
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Socket.IO and API Integration Scripts -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    // Global variables
+    let scanData = [];
+    let typePieChart = null;
+    let colorPieChart = null;
+
+    // Function to fetch and refresh data via your backend API
+    function refreshAllData() {
+      // Show spinner while fetching
+      document.getElementById('spinnerContainer').style.display = 'block';
+      
+      fetch('/api/refreshData')  // Endpoint that runs your VS Code program to pull & process data
+        .then(resp => resp.json())
+        .then(data => {
+          console.log("Data refreshed:", data);
+          loadScanData(); // Re-fetch the processed scan data
+        })
+        .catch(err => console.error("Error refreshing data:", err))
+        .finally(() => {
+          // Hide spinner when done
+          document.getElementById('spinnerContainer').style.display = 'none';
+        });
+    }
+
+    // Fetch scan data for table and stats
+    function loadScanData() {
+      fetch('/api/tags')
+        .then(resp => resp.json())
+        .then(data => {
+          scanData = data;
+          populateTable();
+          updateStats();
+        })
+        .catch(err => console.error("Error fetching scan data:", err));
+    }
+
+    // Populate scan data table
+    function populateTable() {
+      const tbody = document.querySelector('#scanDataTable tbody');
+      tbody.innerHTML = "";
+      scanData.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${new Date(item.firstSeen).toLocaleString()}</td>
+          <td>${item.tidHex || ""}</td>
+          <td>${item.epcHex || ""}</td>
+          <td>${item.epcAscii || ""}</td>
+          <td>${item.rssi || ""}</td>
+          <td>${item.seenCount || ""}</td>
+          <td>${item.lot || ""}</td>
+          <td>${item.dept || ""}</td>
+          <td>${item.row || ""}</td>
+          <td>${item.deptLot || ""}</td>
+          <td>${item.supplier || ""}</td>
+          <td>${item.type || ""}</td>
+          <td>${item.color || ""}</td>
+          <td>${item.format || ""}</td>
+          <td>${item.pounds || ""}</td>
+          <td>${item.price || ""}</td>
+          <td>${item.freight || ""}</td>
+          <td>${item.toll || ""}</td>
+          <td>${item.date || ""}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Update stats: tag counts, pie charts, and top suppliers
+    function updateStats() {
+      let counts = { PL: 0, FF: 0, BL: 0, GL: 0 };
+      let typeData = {};
+      let colorData = {};
+      let supplierData = {};
+
+      scanData.forEach(item => {
+        // Count tags based on epcAscii prefixes (adjust logic as needed)
+        if(item.epcAscii) {
+          if(item.epcAscii.startsWith("PL")) counts.PL++;
+          else if(item.epcAscii.startsWith("FF")) counts.FF++;
+          else if(item.epcAscii.startsWith("BL")) counts.BL++;
+          else if(item.epcAscii.startsWith("GL")) counts.GL++;
+        }
+        // Sum pounds by type and color for pie charts
+        if(item.type) {
+          typeData[item.type] = (typeData[item.type] || 0) + (parseFloat(item.pounds) || 0);
+        }
+        if(item.color) {
+          colorData[item.color] = (colorData[item.color] || 0) + (parseFloat(item.pounds) || 0);
+        }
+        // Aggregate supplier data: sum pounds and gather unique types
+        if(item.supplier) {
+          if(!supplierData[item.supplier]) {
+            supplierData[item.supplier] = { pounds: 0, types: new Set() };
+          }
+          supplierData[item.supplier].pounds += (parseFloat(item.pounds) || 0);
+          if(item.type) supplierData[item.supplier].types.add(item.type);
+        }
+      });
+
+      // Update tag count stats
+      document.getElementById('plCount').innerText = counts.PL;
+      document.getElementById('ffCount').innerText = counts.FF;
+      document.getElementById('blCount').innerText = counts.BL;
+      document.getElementById('glCount').innerText = counts.GL;
+
+      // Update pie charts for Type and Color distributions
+      updatePieChart('typePieChart', Object.keys(typeData), Object.values(typeData), typePieChart, (chart) => { typePieChart = chart; });
+      updatePieChart('colorPieChart', Object.keys(colorData), Object.values(colorData), colorPieChart, (chart) => { colorPieChart = chart; });
+
+      // Update Top 10 Suppliers table
+      let suppliersArray = Object.entries(supplierData).map(([supplier, data]) => {
+        return { supplier, pounds: data.pounds, types: Array.from(data.types).join(", ") };
+      });
+      suppliersArray.sort((a, b) => b.pounds - a.pounds);
+      suppliersArray = suppliersArray.slice(0, 10);
+      populateSuppliersTable(suppliersArray);
+    }
+
+    // Helper: Update or initialize a pie chart
+    function updatePieChart(canvasId, labels, dataArray, chartInstance, setChart) {
+      const ctx = document.getElementById(canvasId).getContext('2d');
+      if(chartInstance) {
+        chartInstance.data.labels = labels;
+        chartInstance.data.datasets[0].data = dataArray;
+        chartInstance.update();
+      } else {
+        const newChart = new Chart(ctx, {
+          type: 'pie',
+          data: {
+            labels: labels,
+            datasets: [{
+              data: dataArray,
+              backgroundColor: [
+                'rgba(75, 192, 192, 0.7)',
+                'rgba(255, 205, 86, 0.7)',
+                'rgba(255, 99, 132, 0.7)',
+                'rgba(54, 162, 235, 0.7)',
+                'rgba(201, 203, 207, 0.7)'
+              ]
+            }]
+          },
+          options: {
+            responsive: false,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } }
+          }
+        });
+        setChart(newChart);
+      }
+    }
+
+    // Populate the Top 10 Suppliers table
+    function populateSuppliersTable(suppliers) {
+      const tbody = document.querySelector('#topSuppliersTable tbody');
+      tbody.innerHTML = "";
+      suppliers.forEach(s => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${s.supplier}</td><td>${s.pounds.toFixed(2)}</td><td>${s.types}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Set up the Refresh Data button
+    document.getElementById('dataButton').addEventListener('click', function() {
+      refreshAllData();
+    });
+
+    // Initial data load
+    window.onload = function() {
+      loadScanData();
+    };
+  </script>
+</body>
+</html>
