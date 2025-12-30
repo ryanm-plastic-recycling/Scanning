@@ -48,6 +48,7 @@ const START_URL = "/cloud/start";
 const STOP_URL = "/cloud/stop";
 const HEALTH_POLL_INTERVAL_MS = 7000; // 7s base interval
 const MAX_HEALTH_BACKOFF_MS = 30000;  // cap backoff at 30s
+const MIN_HEALTH_POLL_MS = 5000;      // do not poll faster than 5s
 
 // Per-reader health tracking
 const readerHealth = new Map();
@@ -69,6 +70,7 @@ function ensureHealth(reader) {
       lastError: "",
       lastTagAt: null,
       tokenIssuedAt: null,
+      tokenAgeSec: null,
       failureCount: 0,
       nextPollTime: 0
     });
@@ -83,10 +85,11 @@ function healthPayload() {
     ip: h.ip,
     reachable: !!h.reachable,
     authOk: !!h.authOk,
-    isScanning: !!h.isScanning,
+    isScanning: !!h.isScanning || !!isScanning || !!isFindBoxScanning,
     lastOkAt: h.lastOkAt,
     lastError: h.lastError,
     lastTagAt: h.lastTagAt,
+    tokenIssuedAt: h.tokenIssuedAt,
     tokenAgeSec: h.tokenIssuedAt ? Math.floor((now - h.tokenIssuedAt) / 1000) : null
   }));
 }
@@ -98,6 +101,9 @@ function emitHealth() {
 // Update helper that also emits
 function updateHealth(reader, updates = {}) {
   const h = ensureHealth(reader);
+  if (updates.isScanning === undefined) {
+    updates.isScanning = isScanning || isFindBoxScanning;
+  }
   Object.assign(h, updates);
   emitHealth();
   return h;
@@ -110,18 +116,20 @@ async function pollHealth() {
     const h = ensureHealth(reader);
     if (h.nextPollTime && now < h.nextPollTime) return;
     try {
-      await loginToReader(reader);
+      await loginToReader(reader, { healthCheck: true });
       h.failureCount = 0;
       h.lastOkAt = Date.now();
       h.lastError = "";
       h.reachable = true;
       h.authOk = true;
-      h.tokenIssuedAt = h.lastOkAt;
-      h.nextPollTime = now + HEALTH_POLL_INTERVAL_MS;
+      h.isScanning = isScanning || isFindBoxScanning;
+      if (!h.tokenIssuedAt) h.tokenIssuedAt = h.lastOkAt;
+      h.nextPollTime = now + Math.max(MIN_HEALTH_POLL_MS, HEALTH_POLL_INTERVAL_MS);
     } catch (err) {
       h.failureCount = (h.failureCount || 0) + 1;
       h.reachable = false;
       h.authOk = false;
+      h.isScanning = isScanning || isFindBoxScanning;
       h.lastError = String(err?.message || err);
       const backoff = Math.min(MAX_HEALTH_BACKOFF_MS, HEALTH_POLL_INTERVAL_MS * (h.failureCount + 1));
       h.nextPollTime = now + backoff;
@@ -185,6 +193,7 @@ io.on('connection', (socket) => {
         // We do not set isScanning here since this is a dedicated find box session.
         scanStartTime = new Date();
         console.log("Find a Box scanning started successfully on all readers.");
+        READERS.forEach(r => updateHealth(r, { isScanning: true }));
         socket.emit('findBoxScanStatus', { success: true, message: "Find a Box scanning started" });
       })
       .catch(err => {
@@ -199,6 +208,7 @@ io.on('connection', (socket) => {
       .then(() => {
         isFindBoxScanning = false;
         console.log("Find a Box scanning stopped successfully on all readers.");
+        READERS.forEach(r => updateHealth(r, { isScanning: false }));
         socket.emit('findBoxScanStatus', { success: true, message: "Find a Box scanning stopped" });
       })
       .catch(err => {
@@ -610,23 +620,30 @@ async function loginAndStart(reader) {
 }
 
 // Helper for re-login without starting scanning (used if token is rejected during stop)
-async function loginToReader(reader) {
+async function loginToReader(reader, opts = {}) {
+  const { healthCheck = false } = opts;
   const loginUrl = `https://${reader.ip}${AUTH_URL}`;
   const authString = Buffer.from(`${reader.user}:${reader.pass}`).toString('base64');
+  const h = ensureHealth(reader);
   const resp = await axios.get(loginUrl, {
     headers: { 'Authorization': `Basic ${authString}` },
     httpsAgent
   });
   if (resp.data && resp.data.message) {
-    reader.token = resp.data.message;
+    if (!healthCheck || !reader.token) {
+      reader.token = resp.data.message;
+    }
     const now = Date.now();
-    updateHealth(reader, {
+    const updates = {
       reachable: true,
       authOk: true,
       lastOkAt: now,
-      lastError: "",
-      tokenIssuedAt: now
-    });
+      lastError: ""
+    };
+    if (!healthCheck || !h.tokenIssuedAt) {
+      updates.tokenIssuedAt = now;
+    }
+    updateHealth(reader, updates);
   } else {
     throw new Error(`No token in login response from ${reader.ip}`);
   }
@@ -738,5 +755,3 @@ server.listen(APP_PORT, () => {
   console.log(`Point your browser to http://localhost:${APP_PORT}/`);
   console.log(`DB Preview reads: ${LOCAL_DB_XLSX} (override with LOCAL_DB_XLSX env var)`);
 });
-
-
