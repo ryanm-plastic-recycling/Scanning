@@ -254,6 +254,22 @@
       border-bottom: none;
       font-size: 16px;
     }
+    #readerHealthCard table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    #readerHealthCard th, #readerHealthCard td {
+      padding: 6px 8px;
+      text-align: left;
+      font-size: 15px;
+      border-bottom: 1px solid #eee;
+    }
+    #readerHealthCard th {
+      background: #f7f7f7;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
 
     #chartsColumn {
       flex: 1;
@@ -398,6 +414,24 @@
 
     <div class="status-bar" id="statusMessage"></div>
 
+    <div class="statsBox" id="readerHealthCard">
+      <h3>Reader Health</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Reader</th>
+            <th>Status</th>
+            <th>Last OK (s ago)</th>
+            <th>Last Tag (s ago)</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody id="readerHealthBody">
+          <tr><td colspan="5">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
     <div id="statsContainer">
       <div id="leftStats">
         <div class="statsBox" id="lotTypeStats">
@@ -449,6 +483,18 @@
             <tr><td>Tags seen (last 60s):</td><td id="tagsLast60">0</td></tr>
             <tr><td>New tags / minute:</td><td id="newPerMin">0</td></tr>
             <tr><td>Time since last new tag:</td><td id="sinceLastNew">—</td></tr>
+          </table>
+        </div>
+
+        <div class="statsBox" id="readerCountsBox">
+          <h3>Reader Stats</h3>
+          <table>
+            <thead>
+              <tr><th>Reader</th><th>Unique Tags</th><th>Tags/min (last 60s)</th></tr>
+            </thead>
+            <tbody id="readerCountsBody">
+              <tr><td colspan="3">No data</td></tr>
+            </tbody>
           </table>
         </div>
       </div>
@@ -537,6 +583,7 @@
 
   <script>
     let allTags = [];
+    let readerHealthState = [];
     let timerInterval = null;
     let startTime = null;
     let elapsedTime = 0;
@@ -579,17 +626,28 @@
       clearInterval(pollTimer);
       pollTimer = setInterval(refreshTags, intervalMs);
     }
-    socket.on('connect', () => startPolling(60000));
+    socket.on('connect', () => { startPolling(60000); fetchReaderHealth(); });
     socket.on('disconnect', () => startPolling(3000));
+    socket.on('readerHealth', data => {
+      readerHealthState = Array.isArray(data) ? data : [];
+      renderReaderHealth();
+    });
 
     socket.on('newTag', tag => {
       const ex = allTags.find(t => t.epcHex === tag.epcHex);
       if (ex) {
         ex.seenCount = tag.seenCount;
         ex.rssi = tag.rssi;
+        const readerLabel = getReaderLabel(tag);
+        if (readerLabel) {
+          ex.reader = ex.reader || readerLabel;
+          ex.readerIp = ex.readerIp || tag.readerIp;
+          ex._readerKey = readerLabel;
+        }
       } else {
         tag._ascii = (tag.epcAscii || "").toLowerCase();
         tag._ts = Date.parse(tag.firstSeen || 0) || 0;
+        tag._readerKey = getReaderLabel(tag);
         allTags.push(tag);
         lastNewTagAt = Date.now();
       }
@@ -603,6 +661,64 @@
       resetTimerDisplay();
       updateStats(true);
     });
+
+    function fetchReaderHealth() {
+      fetch('/api/health', { cache: 'no-store' })
+        .then(safeJson)
+        .then(data => {
+          readerHealthState = Array.isArray(data) ? data : [];
+          renderReaderHealth();
+        })
+        .catch(err => console.warn("Health fetch failed:", err));
+    }
+
+    function formatSecondsAgo(ts, now = Date.now()) {
+      const ms = normalizeTimestampMs(ts);
+      if (!ms) return "—";
+      const diffSec = Math.max(0, Math.floor((now - ms) / 1000));
+      return diffSec.toLocaleString();
+    }
+
+    function truncateError(str, maxLen = 80) {
+      const s = String(str || "");
+      return s.length > maxLen ? (s.slice(0, maxLen - 1) + "…") : s;
+    }
+
+    function renderReaderHealth() {
+      const tbody = document.getElementById('readerHealthBody');
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      if (!readerHealthState || !readerHealthState.length) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 5;
+        td.textContent = "No reader data";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      const now = Date.now();
+      readerHealthState.forEach(h => {
+        const tr = document.createElement('tr');
+        const status = h.reachable ? (h.authOk ? "Online" : "AuthFail") : "Offline";
+        const cols = [
+          h.name || h.ip || "Unknown",
+          status,
+          formatSecondsAgo(h.lastOkAt, now),
+          formatSecondsAgo(h.lastTagAt, now),
+          truncateError(h.lastError || "", 60)
+        ];
+        cols.forEach((txt, idx) => {
+          const td = document.createElement('td');
+          td.textContent = txt;
+          if (idx === 4) td.classList.add('truncate');
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+    }
 
     document.addEventListener('DOMContentLoaded', () => init());
 
@@ -673,6 +789,7 @@
 
       // Keep "time since last new tag" ticking even when no tags arrive
       setInterval(() => updateTimeWindowOnly(), 1000);
+      setInterval(() => renderReaderHealth(), 5000);
 
       window.addEventListener("beforeunload", function (e) {
         if (isScanning) {
@@ -761,6 +878,11 @@
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+    }
+
+    function getReaderLabel(tag) {
+      if (!tag) return "";
+      return tag.reader || tag.readerName || tag.readerIp || "";
     }
 
     function parseNumberLoose(v) {
@@ -934,6 +1056,7 @@
           tags.forEach(t => {
             t._ascii = (t.epcAscii || "").toLowerCase();
             t._ts = Date.parse(t.firstSeen || 0) || 0;
+            t._readerKey = getReaderLabel(t);
           });
           allTags = tags;
           applyFilter();
@@ -1064,6 +1187,41 @@
       c.appendChild(mkBtn("Last", () => changePage(totalPages), currentPage === totalPages));
     }
 
+    function renderReaderCounts() {
+      const tbody = document.getElementById('readerCountsBody');
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      const cutoff = Date.now() - 60000;
+      const counts = new Map();
+
+      for (const tag of allTags) {
+        const readerName = getReaderLabel(tag);
+        if (!readerName) continue;
+        const entry = counts.get(readerName) || { reader: readerName, unique: 0, last60: 0 };
+        entry.unique += 1;
+        if ((tag._ts || 0) >= cutoff) entry.last60 += 1;
+        counts.set(readerName, entry);
+      }
+
+      const rows = Array.from(counts.values()).sort((a, b) => a.reader.localeCompare(b.reader));
+      if (!rows.length) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 3;
+        td.textContent = "No reader attribution";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      for (const r of rows) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${escapeHtml(r.reader)}</td><td>${r.unique}</td><td>${r.last60}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
     function updateStats(force) {
       const now = Date.now();
       if (!force && (now - lastStatsAt) < STATS_MIN_INTERVAL_MS) return;
@@ -1183,6 +1341,7 @@
       updateGenericPieChart("colorChart", colorTop.labels, colorTop.values, (c) => colorChart = c, () => colorChart);
 
       updateTimeWindowOnly();
+      renderReaderCounts();
     }
 
     function updateTimeWindowOnly() {
