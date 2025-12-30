@@ -46,6 +46,90 @@ const APP_PORT = 3000;          // Node server port
 const AUTH_URL = "/cloud/localRestLogin";
 const START_URL = "/cloud/start";
 const STOP_URL = "/cloud/stop";
+const HEALTH_POLL_INTERVAL_MS = 7000; // 7s base interval
+const MAX_HEALTH_BACKOFF_MS = 30000;  // cap backoff at 30s
+
+// Per-reader health tracking
+const readerHealth = new Map();
+
+function getReaderKey(reader = {}) {
+  return reader.name || reader.ip || "unknown";
+}
+
+function ensureHealth(reader) {
+  const key = getReaderKey(reader);
+  if (!readerHealth.has(key)) {
+    readerHealth.set(key, {
+      name: reader.name,
+      ip: reader.ip,
+      reachable: false,
+      authOk: false,
+      isScanning: false,
+      lastOkAt: null,
+      lastError: "",
+      lastTagAt: null,
+      tokenIssuedAt: null,
+      failureCount: 0,
+      nextPollTime: 0
+    });
+  }
+  return readerHealth.get(key);
+}
+
+function healthPayload() {
+  const now = Date.now();
+  return Array.from(readerHealth.values()).map(h => ({
+    name: h.name,
+    ip: h.ip,
+    reachable: !!h.reachable,
+    authOk: !!h.authOk,
+    isScanning: !!h.isScanning,
+    lastOkAt: h.lastOkAt,
+    lastError: h.lastError,
+    lastTagAt: h.lastTagAt,
+    tokenAgeSec: h.tokenIssuedAt ? Math.floor((now - h.tokenIssuedAt) / 1000) : null
+  }));
+}
+
+function emitHealth() {
+  io.emit('readerHealth', healthPayload());
+}
+
+// Update helper that also emits
+function updateHealth(reader, updates = {}) {
+  const h = ensureHealth(reader);
+  Object.assign(h, updates);
+  emitHealth();
+  return h;
+}
+
+// Poll readers periodically to verify reachability/auth
+async function pollHealth() {
+  const now = Date.now();
+  const tasks = READERS.map(async reader => {
+    const h = ensureHealth(reader);
+    if (h.nextPollTime && now < h.nextPollTime) return;
+    try {
+      await loginToReader(reader);
+      h.failureCount = 0;
+      h.lastOkAt = Date.now();
+      h.lastError = "";
+      h.reachable = true;
+      h.authOk = true;
+      h.tokenIssuedAt = h.lastOkAt;
+      h.nextPollTime = now + HEALTH_POLL_INTERVAL_MS;
+    } catch (err) {
+      h.failureCount = (h.failureCount || 0) + 1;
+      h.reachable = false;
+      h.authOk = false;
+      h.lastError = String(err?.message || err);
+      const backoff = Math.min(MAX_HEALTH_BACKOFF_MS, HEALTH_POLL_INTERVAL_MS * (h.failureCount + 1));
+      h.nextPollTime = now + backoff;
+    }
+  });
+  await Promise.all(tasks);
+  emitHealth();
+}
 
 // Local Excel source for preview (override with env var LOCAL_DB_XLSX)
 const LOCAL_DB_XLSX = process.env.LOCAL_DB_XLSX || path.resolve(__dirname, "data", "Inventory.xlsx");
@@ -88,6 +172,7 @@ io.on('connection', (socket) => {
   console.log('A client connected. Socket ID:', socket.id);
   // Optionally, send the initial tag data:
   socket.emit('initialTags', Object.values(tagStore));
+  socket.emit('readerHealth', healthPayload());
 
   // Listen for Find a Box scanning events from clients
   socket.on('startFindBoxScan', (data) => {
@@ -123,11 +208,31 @@ io.on('connection', (socket) => {
   });
 });
 
+// Initialize health records and start polling
+READERS.forEach(r => ensureHealth(r));
+setInterval(() => {
+  pollHealth().catch(err => console.error("Health poll error:", err));
+}, HEALTH_POLL_INTERVAL_MS);
+pollHealth().catch(err => console.error("Initial health poll error:", err));
+
 /******************************************************
  * 1) PUSH ENDPOINT for Readers to POST Tag Data
  ******************************************************/
 app.post('/fxr90', (req, res) => {
   console.log("FXR90 data inbound:", JSON.stringify(req.body));
+
+  const readerFromReq = resolveReaderFromRequest(req);
+  if (readerFromReq) {
+    updateHealth(readerFromReq, {
+      lastTagAt: Date.now(),
+      lastOkAt: Date.now(),
+      reachable: true,
+      authOk: true
+    });
+  } else {
+    // Update a global entry so the UI still shows activity
+    updateHealth({ name: "Unknown", ip: "unknown" }, { lastTagAt: Date.now() });
+  }
 
   // Process tag data if either normal scanning or find box scanning is active.
   if (!isScanning && !isFindBoxScanning) {
@@ -163,6 +268,8 @@ app.post('/fxr90', (req, res) => {
         epcAscii: epcAscii,
         antenna: event.data.antenna,
         rssi: event.data.peakRssi,
+        reader: readerFromReq?.name,
+        readerIp: readerFromReq?.ip,
         seenCount: 1
       };
       tagStore[key] = newTag;
@@ -173,6 +280,8 @@ app.post('/fxr90', (req, res) => {
       // Update the tag data and emit update for findBoxTag
       tagStore[key].seenCount = event.data.seenCount || (tagStore[key].seenCount + 1);
       tagStore[key].rssi = event.data.peakRssi;
+      tagStore[key].reader = readerFromReq?.name || tagStore[key].reader;
+      tagStore[key].readerIp = readerFromReq?.ip || tagStore[key].readerIp;
       io.emit('findBoxTag', tagStore[key]);
     }
   });
@@ -189,6 +298,7 @@ app.get('/api/start', async (req, res) => {
   try {
     await Promise.all(READERS.map(r => loginAndStart(r)));
     isScanning = true;
+    READERS.forEach(r => updateHealth(r, { isScanning: true }));
     scanStartTime = new Date();
     console.log("Scanning started successfully on all readers.");
     res.json({ success: true, message: "Scanning started" });
@@ -204,6 +314,7 @@ app.get('/api/stop', async (req, res) => {
   try {
     await Promise.all(READERS.map(r => stopReader(r)));
     isScanning = false;
+    READERS.forEach(r => updateHealth(r, { isScanning: false }));
     console.log("Scanning stopped successfully on all readers.");
     res.json({ success: true, message: "Scanning stopped" });
   } catch (err) {
@@ -218,6 +329,7 @@ app.get('/api/pause', async (req, res) => {
   try {
     await Promise.all(READERS.map(r => stopReader(r)));
     isScanning = false;
+    READERS.forEach(r => updateHealth(r, { isScanning: false }));
     res.json({ success: true, message: "Scanning paused (data retained)" });
   } catch (err) {
     console.error("Error in /api/pause:", err);
@@ -236,6 +348,12 @@ app.get('/api/clear', (req, res) => {
 app.get('/api/tags', (req, res) => {
   res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json(Object.values(tagStore));
+});
+
+// Reader health
+app.get('/api/health', (req, res) => {
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json(healthPayload());
 });
 
 // Export to XLSX
@@ -475,6 +593,8 @@ async function loginAndStart(reader) {
   });
   if (resp.data && resp.data.message) {
     reader.token = resp.data.message;
+    const now = Date.now();
+    updateHealth(reader, { reachable: true, authOk: true, lastOkAt: now, lastError: "", tokenIssuedAt: now });
   } else {
     throw new Error(`No token in login response from ${reader.ip}`);
   }
@@ -499,6 +619,14 @@ async function loginToReader(reader) {
   });
   if (resp.data && resp.data.message) {
     reader.token = resp.data.message;
+    const now = Date.now();
+    updateHealth(reader, {
+      reachable: true,
+      authOk: true,
+      lastOkAt: now,
+      lastError: "",
+      tokenIssuedAt: now
+    });
   } else {
     throw new Error(`No token in login response from ${reader.ip}`);
   }
@@ -512,6 +640,7 @@ async function startReader(reader) {
       headers: { 'Authorization': `Bearer ${reader.token}` },
       httpsAgent
     });
+    updateHealth(reader, { isScanning: true, reachable: true, authOk: true, lastOkAt: Date.now(), lastError: "" });
   } catch (err) {
     if (err.response && err.response.status === 422) {
       console.log(`Reader ${reader.ip} already scanning. Issuing STOP then retrying START...`);
@@ -521,6 +650,7 @@ async function startReader(reader) {
         headers: { 'Authorization': `Bearer ${reader.token}` },
         httpsAgent
       });
+      updateHealth(reader, { isScanning: true, reachable: true, authOk: true, lastOkAt: Date.now(), lastError: "" });
     } else {
       throw err;
     }
@@ -531,21 +661,33 @@ async function startReader(reader) {
 async function stopReader(reader) {
   const url = `https://${reader.ip}${STOP_URL}`;
   try {
-    return await axios.put(url, {}, {
+    const resp = await axios.put(url, {}, {
       headers: { 'Authorization': `Bearer ${reader.token}` },
       httpsAgent
     });
+    updateHealth(reader, { isScanning: false, reachable: true, authOk: true, lastOkAt: Date.now(), lastError: "" });
+    return resp;
   } catch (err) {
     if (err.response && err.response.status === 401) {
       console.log(`Received 401 on stop for ${reader.ip}, re-logging in...`);
       await loginToReader(reader);
-      return axios.put(url, {}, {
+      const resp = await axios.put(url, {}, {
         headers: { 'Authorization': `Bearer ${reader.token}` },
         httpsAgent
       });
+      updateHealth(reader, { isScanning: false, reachable: true, authOk: true, lastOkAt: Date.now(), lastError: "" });
+      return resp;
     }
     throw err;
   }
+}
+
+function resolveReaderFromRequest(req) {
+  const forwarded = (req.headers['x-forwarded-for'] || "").split(',')[0].trim();
+  const rawRemote = req.connection?.remoteAddress || req.socket?.remoteAddress || "";
+  const cleanedRemote = rawRemote.replace("::ffff:", "");
+  const ipGuess = forwarded || cleanedRemote;
+  return READERS.find(r => ipGuess.endsWith(r.ip));
 }
 
 // Convert EPC from hex to ASCII
