@@ -6,6 +6,7 @@
 
   <!-- Chart.js (LOCAL) -->
   <script src="js/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
 
   <style>
     /* Base and Background */
@@ -444,6 +445,7 @@
         <div class="statsBox" id="timeWindowBox">
           <h3>Time Window</h3>
           <table>
+            <tr><td>Tags seen (last 10 seconds):</td><td id="tagsLast10Unique">0</td></tr>
             <tr><td>Tags seen (last 60s):</td><td id="tagsLast60">0</td></tr>
             <tr><td>New tags / minute:</td><td id="newPerMin">0</td></tr>
             <tr><td>Time since last new tag:</td><td id="sinceLastNew">—</td></tr>
@@ -544,6 +546,8 @@
     let lotChart = null;
     let typeChart = null;
     let colorChart = null;
+
+    Chart.register(ChartDataLabels);
 
     let currentPage = 1;
     const pageSize = 500;
@@ -766,6 +770,31 @@
       const cleaned = s.replace(/[$, ]+/g, '').replace(/[^\d.\-]/g, '');
       const n = parseFloat(cleaned);
       return Number.isFinite(n) ? n : 0;
+    }
+
+    function normalizeTimestampMs(ts) {
+      if (ts === null || ts === undefined || ts === "") return 0;
+      if (ts instanceof Date) return ts.getTime();
+      if (typeof ts === "number") return ts > 1e12 ? ts : ts * 1000;
+
+      const str = String(ts).trim();
+      if (!str) return 0;
+
+      if (/^[+-]?\d+(\.\d+)?$/.test(str)) {
+        const num = Number(str);
+        if (Number.isFinite(num)) return num > 1e12 ? num : num * 1000;
+      }
+
+      const parsed = new Date(str).getTime();
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function getTagUniqueKey(tag) {
+      const candidates = [tag.epcAscii, tag.epcHex, tag.tidHex, tag.tid, tag.epc, tag.id];
+      for (const c of candidates) {
+        if (c !== undefined && c !== null && c !== "") return String(c);
+      }
+      return null;
     }
 
     function hasNonBlank(v) {
@@ -1059,6 +1088,8 @@
 
       const nowMs = Date.now();
       const since60 = nowMs - 60000;
+      const cutoff10s = nowMs - 10_000;
+      const uniqueLast10 = new Set();
       let tagsLast60 = 0;
 
       for (const tag of allTags) {
@@ -1075,6 +1106,11 @@
         else if(len === 12) len12++;
         else if(len === 16) len16++;
         else lenOther++;
+
+        const tsSource = (tag.lastSeen !== undefined && tag.lastSeen !== null && tag.lastSeen !== "") ? tag.lastSeen : (tag.firstSeen ?? tag._ts);
+        const normalizedTs = normalizeTimestampMs(tsSource || tag._ts);
+        const keyForUniq = getTagUniqueKey(tag);
+        if (normalizedTs >= cutoff10s && keyForUniq) uniqueLast10.add(keyForUniq);
 
         if ((tag._ts || 0) >= since60) tagsLast60++;
 
@@ -1105,6 +1141,7 @@
 
       const totalLot = pl + ff + bl + gl + other;
       const totalLen = len8 + len12 + len16 + lenOther;
+      const tagsLast10Unique = uniqueLast10.size;
 
       document.getElementById('plCount').innerText = pl + " (" + (totalLot ? (pl/totalLot*100).toFixed(1) : 0) + "%)";
       document.getElementById('ffCount').innerText = ff + " (" + (totalLot ? (ff/totalLot*100).toFixed(1) : 0) + "%)";
@@ -1132,6 +1169,7 @@
       document.getElementById('hasPrice').innerText  = hasPrice.toLocaleString();
       document.getElementById('noPrice').innerText   = noPrice.toLocaleString();
 
+      document.getElementById('tagsLast10Unique').innerText = tagsLast10Unique.toLocaleString();
       document.getElementById('tagsLast60').innerText = tagsLast60.toLocaleString();
       document.getElementById('newPerMin').innerText  = tagsLast60.toLocaleString();
       // sinceLastNew is updated in updateTimeWindowOnly()
@@ -1208,7 +1246,18 @@
           maintainAspectRatio: false,
           animation: { duration: 200 },
           plugins: {
-            legend: { position: 'bottom', labels: { font: { size: 14 } } }
+            legend: { position: 'bottom', labels: { font: { size: 14 } } },
+            datalabels: {
+              formatter: (value, ctx) => {
+                const data = ctx.chart.data.datasets[0].data || [];
+                const total = data.reduce((a,b)=>a + (Number(b)||0), 0);
+                const pct = total ? ((Number(value)||0) / total) * 100 : 0;
+                return pct >= 2 ? pct.toFixed(1) + '%' : '';
+              },
+              anchor: 'center',
+              align: 'center',
+              clamp: true
+            }
           },
           onClick: (evt) => {
             const points = lotChart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
@@ -1247,7 +1296,20 @@
           responsive: false,
           maintainAspectRatio: false,
           animation: { duration: 200 },
-          plugins: { legend: { position: 'bottom', labels: { font: { size: 14 } } } }
+          plugins: {
+            legend: { position: 'bottom', labels: { font: { size: 14 } } },
+            datalabels: {
+              formatter: (value, ctx) => {
+                const data = ctx.chart.data.datasets[0].data || [];
+                const total = data.reduce((a,b)=>a + (Number(b)||0), 0);
+                const pct = total ? ((Number(value)||0) / total) * 100 : 0;
+                return pct >= 2 ? pct.toFixed(1) + '%' : '';
+              },
+              anchor: 'center',
+              align: 'center',
+              clamp: true
+            }
+          }
         }
       });
 
