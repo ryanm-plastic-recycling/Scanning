@@ -72,12 +72,15 @@
     }
     .controls button:hover { background-color: rgba(37,64,143,0.9); transform: translateY(-2px); }
     .controls label { font-size: 18px; font-weight: bold; }
-    .controls input { width: 200px; font-size: 16px; padding: 8px; }
+    .controls input { width: 220px; font-size: 16px; padding: 8px; }
+    .toggle-group { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .toggle-group label { font-weight: normal; font-size: 15px; }
 
     /* Status */
     #scanningFlag { font-size: 24px; font-weight: bold; margin-left: 20px; }
     #findBoxTimer { font-size: 20px; margin-left: 10px; color: #555; }
     #statusTextContainer { display: block; text-align: center; margin-bottom: 10px; }
+    #bestMatchDetails { font-size: 15px; color: #444; }
 
     /* Signal Bar */
     #signalBarWrapper { text-align: center; }
@@ -97,6 +100,19 @@
       width: 1100px; height: 600px; margin-left: auto; margin-right: auto;
     }
     #rssiChart { width: 100% !important; height: 100% !important; }
+
+    /* Tables */
+    table { border-collapse: collapse; width: 100%; background: rgba(255,255,255,0.95); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    th, td { padding: 10px; border-bottom: 1px solid #ddd; text-align: left; font-size: 14px; }
+    th { background: #f6f6f6; }
+
+    .panel { margin-top: 15px; padding: 12px; border: 1px solid rgba(200,200,200,0.7); background: rgba(255,255,255,0.9); border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    #directionHint { margin-top: 8px; font-weight: bold; color: rgba(37,64,143,1); }
+    .status-pill { padding: 4px 8px; border-radius: 12px; color: #fff; font-weight: bold; font-size: 12px; }
+    .pill-online { background: #2e8b57; }
+    .pill-auth { background: #c27c0e; }
+    .pill-offline { background: #c0392b; }
+    .mono { font-family: monospace; }
   </style>
 </head>
 <body>
@@ -125,15 +141,21 @@
     <!-- Find a Box Controls -->
     <div class="controls">
       <label for="findBoxInput">Enter ASCII Tag:</label>
-      <input type="text" id="findBoxInput" placeholder="e.g. PL111222">
+      <input type="text" id="findBoxInput" placeholder="e.g. FF000123 or FF000123-B13">
       <button id="startSearchBtn">Start Search</button>
       <button id="stopSearchBtn">Stop Search</button>
+      <div class="toggle-group">
+        <label><input type="checkbox" id="exactToggle"> Exact match</label>
+        <label><input type="checkbox" id="lotToggle"> Lot prefix match</label>
+        <label><input type="checkbox" id="audioToggle"> Audio beeps</label>
+      </div>
     </div>
 
     <!-- Status and Signal Bar -->
     <div class="controls" id="bestMatchStatus">
       <div id="statusTextContainer">
         <span id="bestMatchText">No box found yet.</span><br>
+        <span id="bestMatchDetails"></span><br>
         <span id="scanningFlag">Not Scanning</span>
         <span id="findBoxTimer">00:00:00</span>
       </div>
@@ -148,7 +170,47 @@
           <span id="maxValueText">Max: -100 dBm</span> |
           <span id="minValueText">Min: -100 dBm</span>
         </div>
+        <div id="directionHint" style="display:none;"></div>
       </div>
+    </div>
+
+    <div class="panel">
+      <h3>Top Matches</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>EPC ASCII</th>
+            <th>RSSI (smoothed)</th>
+            <th>RSSI (raw)</th>
+            <th>Reader</th>
+            <th>Antenna</th>
+            <th>Seen Count</th>
+            <th>Last Seen (s ago)</th>
+          </tr>
+        </thead>
+        <tbody id="topMatchesBody">
+          <tr><td colspan="7">No matches yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h3>Reader Health</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Reader</th>
+            <th>Status</th>
+            <th>Token Age</th>
+            <th>Last OK</th>
+            <th>Last Tag</th>
+            <th>Last Error</th>
+          </tr>
+        </thead>
+        <tbody id="readerHealthBody">
+          <tr><td colspan="6">Waiting for updates...</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <!-- RSSI Chart -->
@@ -168,11 +230,17 @@
     // --- RSSI config ---
     const RSSI_CLAMP_MIN = -100;  // hard floor shown
     const RSSI_CLAMP_MAX =  -50;  // hard ceiling shown
-    const EMA_ALPHA = 0.3;        // 0.2–0.4 is a good range
+    const EMA_ALPHA = 0.3;        // smoothing
+    const LOSS_TIMEOUT_MS = 3000; // signal lost threshold
 
-    let findBoxTags = [];
-    let bestRSSI = -100;          // raw best
-    let emaRSSI  = -100;          // smoothed
+    // Audio
+    const BEEP_MIN_INTERVAL = 120; // ms (strong signal)
+    const BEEP_MAX_INTERVAL = 1200; // ms (weak signal)
+    const BEEP_DURATION = 80; // ms tone duration
+
+    let tagMap = new Map(); // key: epcHex -> info
+    let bestRSSI = -100;          // best raw
+    let emaRSSI  = -100;          // best smoothed
     let rssiData = [];
     let rssiDataEma = [];
     let timeLabels = [];
@@ -183,12 +251,60 @@
     let currentMaxRSSI = -100;
     let lastTagTimestamp = 0;
     let findBoxStartTime = 0;
+    let manualOverride = false;
+
+    // Audio state
+    let audioCtx = null;
+    let beepTimeout = null;
+    let audioEnabled = false;
 
     function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
     function convertRSSIToPercentage(rssi) {
       const v = clamp(rssi, RSSI_CLAMP_MIN, RSSI_CLAMP_MAX);
       const pct = Math.round(((v - RSSI_CLAMP_MIN) / (RSSI_CLAMP_MAX - RSSI_CLAMP_MIN)) * 100);
       return clamp(pct, 0, 100);
+    }
+    function normalizeInput() {
+      return document.getElementById('findBoxInput').value.trim().toUpperCase();
+    }
+    function inferSearchMode(input) {
+      if (/-B/i.test(input)) return 'exact';
+      if (/^FF\d{6}$/i.test(input)) return 'lot';
+      return 'contains';
+    }
+    function syncModeControls(mode) {
+      const exact = document.getElementById('exactToggle');
+      const lot = document.getElementById('lotToggle');
+      if (manualOverride) return; // user chose explicitly
+      exact.checked = mode === 'exact';
+      lot.checked = mode === 'lot';
+    }
+    function determineMode(input) {
+      const exact = document.getElementById('exactToggle');
+      const lot = document.getElementById('lotToggle');
+      if (manualOverride) {
+        if (exact.checked) return 'exact';
+        if (lot.checked) return 'lot';
+        return 'contains';
+      }
+      const mode = inferSearchMode(input);
+      syncModeControls(mode);
+      return mode;
+    }
+    function tagMatches(epcAscii, input, mode) {
+      if (!input) return false;
+      const ascii = (epcAscii || '').toUpperCase();
+      if (mode === 'exact') return ascii === input;
+      if (mode === 'lot') return ascii.startsWith(input + '-B') || ascii.startsWith(input);
+      return ascii.includes(input);
+    }
+    function formatAgeMs(ts) {
+      if (!ts) return '–';
+      const ageSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+      if (ageSec < 60) return `${ageSec}s ago`;
+      const mins = Math.floor(ageSec / 60);
+      const secs = ageSec % 60;
+      return `${mins}m ${secs}s ago`;
     }
 
     /* ======================
@@ -206,12 +322,12 @@
        D) START / STOP + LOOP
        ====================== */
     function startSearch() {
-      const searchText = document.getElementById('findBoxInput').value.trim().toLowerCase();
+      const searchText = normalizeInput();
       if (!searchText) { alert("Please enter an ASCII tag value."); return; }
       if (!rssiChart) { console.warn('Chart not ready yet'); return; }
 
       scanningActive = true;
-      findBoxTags = [];
+      tagMap = new Map();
       bestRSSI = -100;
       emaRSSI  = -100;
       currentMinRSSI = -100;
@@ -219,7 +335,10 @@
       lastTagTimestamp = Date.now();
       findBoxStartTime = Date.now();
 
+      manualOverride = document.getElementById('exactToggle').checked || document.getElementById('lotToggle').checked ? manualOverride : false;
+
       document.getElementById('bestMatchText').innerText = "Scanning...";
+      document.getElementById('bestMatchDetails').innerText = "";
       document.getElementById('scanningFlag').innerText = "🔎📶 Scanning";
       document.getElementById('scanningFlag').style.color = "green";
 
@@ -237,12 +356,13 @@
 
       if (chartInterval) clearInterval(chartInterval);
       chartInterval = setInterval(() => {
-        // If no tag update for >3 sec, decay toward -100 so the UI shows "cold"
-        if (Date.now() - lastTagTimestamp > 3000) {
+        const silentFor = Date.now() - lastTagTimestamp;
+        if (silentFor > LOSS_TIMEOUT_MS) {
           bestRSSI = Math.max(bestRSSI - 2, -100);
           emaRSSI  = Math.max(emaRSSI - 1.5, -100);
           currentMinRSSI = Math.max(currentMinRSSI - 1, -100);
           currentMaxRSSI = Math.max(currentMaxRSSI - 1, -100);
+          if (silentFor > LOSS_TIMEOUT_MS + 500) stopBeep();
         }
 
         // Push latest points
@@ -253,7 +373,7 @@
         rssiChart.update('none');
         updateSignalBarMarkers(emaRSSI); // use smoothed for bar
 
-        document.getElementById('bestMatchText').innerText = "Best match RSSI: " + emaRSSI.toFixed(1) + " dBm";
+        document.getElementById('bestMatchText').innerText = emaRSSI > -99 ? `Best match RSSI: ${emaRSSI.toFixed(1)} dBm` : 'No match yet';
         const elapsed = Math.floor((Date.now() - findBoxStartTime) / 1000);
         const hrs  = String(Math.floor(elapsed / 3600)).padStart(2, '0');
         const mins = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
@@ -264,9 +384,11 @@
 
     function stopSearch() {
       scanningActive = false;
+      stopBeep();
       if (chartInterval) { clearInterval(chartInterval); chartInterval = null; }
       socket.emit('stopFindBoxScan');
       document.getElementById('bestMatchText').innerText = "Scan stopped.";
+      document.getElementById('bestMatchDetails').innerText = "";
       document.getElementById('scanningFlag').innerText = "🛑 Stopped";
       document.getElementById('scanningFlag').style.color = "red";
     }
@@ -276,29 +398,52 @@
        ====================== */
     socket.on('findBoxTag', function(tag) {
       if (!scanningActive) return;
-      const searchText = document.getElementById('findBoxInput').value.trim().toLowerCase();
-      if (!((tag.epcAscii || "").toLowerCase().includes(searchText))) return;
+      const searchText = normalizeInput();
+      const mode = determineMode(searchText);
+      if (!tagMatches(tag.epcAscii, searchText, mode)) return;
 
-      const existing = findBoxTags.find(t => t.epcHex === tag.epcHex);
-      if (existing) {
-        existing.seenCount = tag.seenCount;
-        existing.rssi = tag.rssi;
-      } else {
-        findBoxTags.push(tag);
-      }
+      const key = tag.epcHex;
+      const existing = tagMap.get(key) || {
+        epcHex: tag.epcHex,
+        epcAscii: tag.epcAscii,
+        antenna: tag.antenna,
+        reader: tag.reader || tag.readerIp || '',
+        readerIp: tag.readerIp,
+        rssiRaw: tag.rssi,
+        smoothedRSSI: tag.rssi,
+        seenCount: 0,
+        lastSeen: Date.now()
+      };
+      existing.seenCount = tag.seenCount || (existing.seenCount + 1);
+      existing.antenna = tag.antenna ?? existing.antenna;
+      existing.reader = tag.reader || existing.reader || tag.readerIp;
+      existing.readerIp = tag.readerIp || existing.readerIp;
+      existing.rssiRaw = tag.rssi;
+      existing.smoothedRSSI = existing.smoothedRSSI == null ? tag.rssi : (EMA_ALPHA * tag.rssi + (1 - EMA_ALPHA) * existing.smoothedRSSI);
+      existing.lastSeen = Date.now();
+
+      tagMap.set(key, existing);
       lastTagTimestamp = Date.now();
 
       // Track min/max (raw)
       if (currentMaxRSSI === -100 || tag.rssi > currentMaxRSSI) currentMaxRSSI = tag.rssi;
       if (currentMinRSSI === -100 || tag.rssi < currentMinRSSI) currentMinRSSI = tag.rssi;
 
-      // Best raw
-      const bestTag = findBoxTags.reduce((prev, curr) => (prev.rssi > curr.rssi ? prev : curr));
-      bestRSSI = bestTag.rssi;
+      // Update best metrics
+      const top = [...tagMap.values()].sort((a,b)=> b.smoothedRSSI - a.smoothedRSSI)[0];
+      if (top) {
+        bestRSSI = top.rssiRaw;
+        emaRSSI = top.smoothedRSSI;
+        document.getElementById('bestMatchDetails').innerText = `${top.epcAscii || ''} (smoothed ${top.smoothedRSSI.toFixed(1)} dBm, raw ${top.rssiRaw.toFixed(1)} dBm)`;
+      }
 
-      // EMA (smooth)
-      emaRSSI = (emaRSSI === -100) ? tag.rssi : (EMA_ALPHA * tag.rssi + (1 - EMA_ALPHA) * emaRSSI);
+      updateTopMatches();
+      updateSignalBarMarkers(emaRSSI);
+      refreshAudio();
+      updateDirectionHint();
     });
+
+    socket.on('readerHealth', updateReaderHealthPanel);
 
     /* ======================
        BAR / INDICATOR
@@ -322,148 +467,227 @@
       else if (rssiForBar >= -80) cur.style.backgroundColor = '#ffb000';   // fair
       else                        cur.style.backgroundColor = '#e74c3c';   // weak
 
-      document.getElementById('currentValueText').innerText = "Current (EMA): " + rssiForBar.toFixed(1) + " dBm";
-      document.getElementById('maxValueText').innerText     = "Max: " + currentMaxRSSI.toFixed(1) + " dBm";
-      document.getElementById('minValueText').innerText     = "Min: " + currentMinRSSI.toFixed(1) + " dBm";
+      document.getElementById('currentValueText').innerText = `Current (EMA): ${rssiForBar.toFixed(1)} dBm`;
+      document.getElementById('maxValueText').innerText     = `Max: ${currentMaxRSSI.toFixed(1)} dBm`;
+      document.getElementById('minValueText').innerText     = `Min: ${currentMinRSSI.toFixed(1)} dBm`;
     }
 
-    // (Unused modal helpers retained)
-    function openFindBoxModal() { document.getElementById('findBoxModal')?.style && (document.getElementById('findBoxModal').style.display = "flex"); }
-    function closeFindBoxModal() { document.getElementById('findBoxModal')?.style && (document.getElementById('findBoxModal').style.display = "none"); }
-    function findBox() {
-      const searchText = document.getElementById('findBoxInput').value.trim().toLowerCase();
-      if (!searchText) { alert("Please enter an ASCII tag value."); return; }
-      const matches = allTags?.filter?.(t => (t.epcAscii || "").toLowerCase().includes(searchText)) || [];
-      if (matches.length === 0) { updateSignalIndicator?.(-100); }
-      else {
-        const bestMatch = matches.reduce((prev, curr) => (prev.rssi > curr.rssi ? prev : curr));
-        updateSignalIndicator?.(bestMatch.rssi);
-      }
-    }
-    function scaleForRSSI(rssi) { rssi = Math.max(-90, Math.min(rssi, -50)); return (-rssi * 0.025 + 3.25); }
-    function updateSignalIndicator(rssi) {
-      const indicator = document.getElementById('signalIndicator');
-      if(!indicator) return;
-      if(rssi === 0) { indicator.style.transform = "scale(1)"; indicator.style.backgroundColor = "rgba(37,64,143,0.5)"; }
-      else {
-        const scaleVal = scaleForRSSI(rssi);
-        indicator.style.transform = "scale(" + scaleVal + ")";
-        let intensity = Math.round(50 + ((-rssi - 50) / 40) * 205);
-        indicator.style.backgroundColor = "rgba(37,64,143," + (intensity/255).toFixed(2) + ")";
-      }
-    }
-  </script>
-
-  <script>
-  // Run only on Find a Box page and only after DOM is ready
-  document.addEventListener('DOMContentLoaded', () => {
-    const onFindBoxPage = !!document.getElementById('rssiChart');
-    if (!onFindBoxPage) return;
-
-    // Wire buttons
-    const startBtn = document.getElementById('startSearchBtn');
-    const stopBtn  = document.getElementById('stopSearchBtn');
-    if (startBtn) startBtn.addEventListener('click', startSearch);
-    if (stopBtn)  stopBtn.addEventListener('click', stopSearch);
-
-    // Enter key: start when idle, stop when running
-    document.getElementById('findBoxInput').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        if (!scanningActive) startSearch();
-        else stopSearch();
-      }
-    });
-
-    // Prefill & auto-start from URL (?tag=XYZ)
-    const params = new URLSearchParams(window.location.search);
-    const prefill = params.get('tag');
-    if (prefill) {
-      const input = document.getElementById('findBoxInput');
-      input.value = prefill;
+    /* ======================
+       TOP MATCHES + DIRECTION
+       ====================== */
+    function updateTopMatches() {
+      const tbody = document.getElementById('topMatchesBody');
+      const rows = [...tagMap.values()].sort((a,b)=> b.smoothedRSSI - a.smoothedRSSI).slice(0,5);
+      if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7">No matches yet.</td></tr>'; return; }
+      tbody.innerHTML = rows.map(r => {
+        const lastSeenAge = Math.max(0, Math.floor((Date.now() - r.lastSeen)/1000));
+        return `<tr>
+          <td class="mono">${r.epcAscii || ''}</td>
+          <td>${r.smoothedRSSI.toFixed(1)} dBm</td>
+          <td>${r.rssiRaw?.toFixed(1) ?? ''} dBm</td>
+          <td>${r.reader || ''}</td>
+          <td>${r.antenna ?? ''}</td>
+          <td>${r.seenCount}</td>
+          <td>${lastSeenAge}s</td>
+        </tr>`;
+      }).join('');
     }
 
-    // Wait for Chart.js (handles CDN fail + local fallback)
-    const waitForChart = setInterval(() => {
-      if (window.Chart) {
-        clearInterval(waitForChart);
-        initRSSIChart();
-        if (prefill) setTimeout(() => startSearch(), 100); // auto-start after chart ready
-      }
-    }, 50);
-    setTimeout(() => clearInterval(waitForChart), 5000); // safety stop
-  });
-
-  /* ======================
-     B) INIT CHART (raw + EMA)
-     ====================== */
-  function initRSSIChart() {
-    if (!window.Chart) { console.warn('Chart.js not loaded; skipping chart init'); return; }
-    const canvas = document.getElementById('rssiChart');
-    if (!canvas) return;
-
-    // Seed 60s buffer at -100 dBm
-    timeLabels = [];
-    rssiData = [];
-    rssiDataEma = [];
-    const now = new Date();
-    for (let i = 59; i >= 0; i--) {
-      const past = new Date(now.getTime() - i * 1000);
-      timeLabels.push(past.toLocaleTimeString());
-      rssiData.push(-100);
-      rssiDataEma.push(-100);
+    function updateDirectionHint() {
+      const hint = document.getElementById('directionHint');
+      const now = Date.now();
+      const recent = [...tagMap.values()].filter(r => now - r.lastSeen <= 2000 && r.antenna != null);
+      if (!recent.length) { hint.style.display = 'none'; return; }
+      const counts = recent.reduce((acc, r)=>{ acc[r.antenna] = (acc[r.antenna]||0) + 1; return acc; }, {});
+      const sorted = Object.entries(counts).sort((a,b)=> b[1]-a[1]);
+      if (!sorted.length) { hint.style.display='none'; return; }
+      const [topAntenna, topCount] = sorted[0];
+      const total = recent.length;
+      if (topCount / total < 0.55) { hint.style.display='none'; return; }
+      hint.style.display='block';
+      hint.innerText = `Likely direction: Antenna ${topAntenna}`;
     }
-    emaRSSI = -100;
 
-    const ctx = canvas.getContext('2d');
-    rssiChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: timeLabels,
-        datasets: [
-          {
-            label: 'RSSI (raw, dBm)',
-            data: rssiData,
-            fill: false,
-            borderColor: 'rgba(37,64,143,0.35)',
-            borderWidth: 2,
-            tension: 0.15
-          },
-          {
-            label: 'RSSI (EMA, dBm)',
-            data: rssiDataEma,
-            fill: false,
-            borderColor: 'rgba(37,64,143,1)',
-            borderWidth: 3,
-            tension: 0.15
-          }
-        ]
-      },
-      options: {
-        animation: false,
-        responsive: true,
-        maintainAspectRatio: true,
-        scales: {
-          y: {
-            min: RSSI_CLAMP_MIN, max: 0, ticks: { stepSize: 10 },
-            grid: { color: ctx => {
-              const v = ctx.tick.value;
-              return (v === -80 || v === -70 || v === -60) ? 'rgba(37,64,143,0.25)' : 'rgba(0,0,0,0.08)';
-            }}
-          },
-          x: { ticks: { maxTicksLimit: 8 } }
-        },
-        plugins: {
-          legend: {
-            position: 'bottom',
-            labels: { font: { size: 14 } }
-          },
-          tooltip: { mode: 'index', intersect: false }
+    /* ======================
+       AUDIO
+       ====================== */
+    function computeBeepInterval(rssi) {
+      const clamped = clamp(rssi, -90, -50);
+      const strength = (clamped + 90) / 40; // 0..1
+      return Math.round(BEEP_MAX_INTERVAL - strength * (BEEP_MAX_INTERVAL - BEEP_MIN_INTERVAL));
+    }
+
+    function playBeep() {
+      if (!audioEnabled) return;
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.frequency.value = 880;
+      gain.gain.value = 0.1;
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + BEEP_DURATION / 1000);
+    }
+
+    function stopBeep() {
+      if (beepTimeout) { clearTimeout(beepTimeout); beepTimeout = null; }
+    }
+
+    function refreshAudio() {
+      stopBeep();
+      if (!audioEnabled || !scanningActive) return;
+      if (Date.now() - lastTagTimestamp > LOSS_TIMEOUT_MS) return;
+      const interval = computeBeepInterval(emaRSSI);
+      beepTimeout = setTimeout(() => { playBeep(); refreshAudio(); }, interval);
+    }
+
+    /* ======================
+       HELPER / INIT
+       ====================== */
+    document.addEventListener('DOMContentLoaded', () => {
+      const onFindBoxPage = !!document.getElementById('rssiChart');
+      if (!onFindBoxPage) return;
+
+      const startBtn = document.getElementById('startSearchBtn');
+      const stopBtn  = document.getElementById('stopSearchBtn');
+      if (startBtn) startBtn.addEventListener('click', startSearch);
+      if (stopBtn)  stopBtn.addEventListener('click', stopSearch);
+
+      document.getElementById('findBoxInput').addEventListener('input', () => {
+        manualOverride = false;
+        const input = normalizeInput();
+        const mode = inferSearchMode(input);
+        syncModeControls(mode);
+      });
+      document.getElementById('findBoxInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          if (!scanningActive) startSearch();
+          else stopSearch();
         }
-      }
-    });
-  }
+      });
 
-  // rssiChart?.update('none');  // (we already use 'none' in the loop)
+      document.getElementById('exactToggle').addEventListener('change', () => { manualOverride = true; document.getElementById('lotToggle').checked = false; });
+      document.getElementById('lotToggle').addEventListener('change', () => { manualOverride = true; document.getElementById('exactToggle').checked = false; });
+      document.getElementById('audioToggle').addEventListener('change', (e) => {
+        audioEnabled = e.target.checked;
+        refreshAudio();
+      });
+
+      // Prefill & auto-start from URL (?tag=XYZ)
+      const params = new URLSearchParams(window.location.search);
+      const prefill = params.get('tag');
+      if (prefill) {
+        const input = document.getElementById('findBoxInput');
+        input.value = prefill;
+        const mode = inferSearchMode(prefill);
+        syncModeControls(mode);
+      }
+
+      // Wait for Chart.js (handles CDN fail + local fallback)
+      const waitForChart = setInterval(() => {
+        if (window.Chart) {
+          clearInterval(waitForChart);
+          initRSSIChart();
+          if (prefill) setTimeout(() => startSearch(), 100); // auto-start after chart ready
+        }
+      }, 50);
+      setTimeout(() => clearInterval(waitForChart), 5000); // safety stop
+    });
+
+    /* ======================
+       B) INIT CHART (raw + EMA)
+       ====================== */
+    function initRSSIChart() {
+      if (!window.Chart) { console.warn('Chart.js not loaded; skipping chart init'); return; }
+      const canvas = document.getElementById('rssiChart');
+      if (!canvas) return;
+
+      // Seed 60s buffer at -100 dBm
+      timeLabels = [];
+      rssiData = [];
+      rssiDataEma = [];
+      const now = new Date();
+      for (let i = 59; i >= 0; i--) {
+        const past = new Date(now.getTime() - i * 1000);
+        timeLabels.push(past.toLocaleTimeString());
+        rssiData.push(-100);
+        rssiDataEma.push(-100);
+      }
+      emaRSSI = -100;
+
+      const ctx = canvas.getContext('2d');
+      rssiChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: timeLabels,
+          datasets: [
+            {
+              label: 'RSSI (raw, dBm)',
+              data: rssiData,
+              fill: false,
+              borderColor: 'rgba(37,64,143,0.35)',
+              borderWidth: 2,
+              tension: 0.15
+            },
+            {
+              label: 'RSSI (EMA, dBm)',
+              data: rssiDataEma,
+              fill: false,
+              borderColor: 'rgba(37,64,143,1)',
+              borderWidth: 3,
+              tension: 0.15
+            }
+          ]
+        },
+        options: {
+          animation: false,
+          responsive: true,
+          maintainAspectRatio: true,
+          scales: {
+            y: {
+              min: RSSI_CLAMP_MIN, max: 0, ticks: { stepSize: 10 },
+              grid: { color: ctx => {
+                const v = ctx.tick.value;
+                return (v === -80 || v === -70 || v === -60) ? 'rgba(37,64,143,0.25)' : 'rgba(0,0,0,0.08)';
+              }}
+            },
+            x: { ticks: { maxTicksLimit: 8 } }
+          },
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { font: { size: 14 } }
+            },
+            tooltip: { mode: 'index', intersect: false }
+          }
+        }
+      });
+    }
+
+    /* ======================
+       HEALTH PANEL
+       ====================== */
+    function updateReaderHealthPanel(healthArr = []) {
+      const tbody = document.getElementById('readerHealthBody');
+      if (!Array.isArray(healthArr) || !healthArr.length) {
+        tbody.innerHTML = '<tr><td colspan="6">No reader health data.</td></tr>';
+        return;
+      }
+      const rows = healthArr.map(h => {
+        const status = h.reachable ? (h.authOk ? { text: 'Online', cls: 'pill-online' } : { text: 'Auth Fail', cls: 'pill-auth' }) : { text: 'Offline', cls: 'pill-offline' };
+        const lastErr = (h.lastError || '').toString();
+        const truncatedErr = lastErr.length > 60 ? lastErr.slice(0, 60) + '…' : lastErr;
+        return `<tr>
+          <td>${h.name || h.ip}</td>
+          <td><span class="status-pill ${status.cls}">${status.text}</span></td>
+          <td>${h.tokenAgeSec != null ? `${h.tokenAgeSec}s` : '–'}</td>
+          <td>${formatAgeMs(h.lastOkAt)}</td>
+          <td>${formatAgeMs(h.lastTagAt)}</td>
+          <td>${truncatedErr || '–'}</td>
+        </tr>`;
+      }).join('');
+      tbody.innerHTML = rows;
+    }
   </script>
 </body>
 </html>
